@@ -27,7 +27,8 @@ namespace ROCKSDB_NAMESPACE {
   defCmd(user_key_return_count)                \
   defCmd(get_from_table_nanos)                 \
   defCmd(block_cache_hit_count)                \
-  defCmd(block_cache_miss_count)
+  defCmd(block_cache_miss_count)               \
+  defCmd(used_data_block_count)
 // clang-format on
 
 // Break down performance counters by level and store per-level perf context in

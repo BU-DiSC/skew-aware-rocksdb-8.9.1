@@ -1282,6 +1282,18 @@ class DBImpl : public DB {
   static std::string GenerateDbSessionId(Env* env);
 
   bool seq_per_batch() const { return seq_per_batch_; }
+  // Wait for memtable flushed.
+  // If flush_memtable_id is non-null, wait until the memtable with the ID
+  // gets flush. Otherwise, wait until the column family don't have any
+  // memtable pending flush.
+  // resuming_from_bg_err indicates whether the caller is attempting to resume
+  // from background error.
+  Status WaitForFlushMemTable(ColumnFamilyData* cfd,
+                              const uint64_t* flush_memtable_id = nullptr,
+                              bool resuming_from_bg_err = false) {
+    return WaitForFlushMemTables({cfd}, {flush_memtable_id},
+                                 resuming_from_bg_err);
+  }
 
  protected:
   const std::string dbname_;
@@ -1974,18 +1986,6 @@ class DBImpl : public DB {
   Status WaitUntilFlushWouldNotStallWrites(ColumnFamilyData* cfd,
                                            bool* flush_needed);
 
-  // Wait for memtable flushed.
-  // If flush_memtable_id is non-null, wait until the memtable with the ID
-  // gets flush. Otherwise, wait until the column family don't have any
-  // memtable pending flush.
-  // resuming_from_bg_err indicates whether the caller is attempting to resume
-  // from background error.
-  Status WaitForFlushMemTable(ColumnFamilyData* cfd,
-                              const uint64_t* flush_memtable_id = nullptr,
-                              bool resuming_from_bg_err = false) {
-    return WaitForFlushMemTables({cfd}, {flush_memtable_id},
-                                 resuming_from_bg_err);
-  }
   // Wait for memtables to be flushed for multiple column families.
   Status WaitForFlushMemTables(
       const autovector<ColumnFamilyData*>& cfds,

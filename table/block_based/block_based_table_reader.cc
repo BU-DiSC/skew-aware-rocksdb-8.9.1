@@ -267,6 +267,8 @@ void BlockBasedTable::UpdateCacheHitMetrics(BlockType block_type,
       } else {
         RecordTick(statistics, BLOCK_CACHE_DATA_HIT);
       }
+      PERF_COUNTER_BY_LEVEL_ADD(used_data_block_count, 1,
+                                static_cast<uint32_t>(rep_->level));
       break;
   }
 }
@@ -320,6 +322,8 @@ void BlockBasedTable::UpdateCacheMissMetrics(BlockType block_type,
       } else {
         RecordTick(statistics, BLOCK_CACHE_DATA_MISS);
       }
+      PERF_COUNTER_BY_LEVEL_ADD(used_data_block_count, 1,
+                                static_cast<uint32_t>(rep_->level));
       break;
   }
 }

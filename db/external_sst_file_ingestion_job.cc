@@ -974,6 +974,14 @@ Status ExternalSstFileIngestionJob::AssignLevelAndSeqnoForIngestedFile(
     *assigned_seqno = last_seqno + 1;
   }
 
+  // Need to ensure the picked level does not overlap with the ingested file
+  // in terms of the key range. An infinite loop may occur if the picked
+  // level cannot hold the piecked file (set disable_auto_compaction=true in
+  // case of this)
+  if (ingestion_options_.picked_level != -1) {
+    target_level = ingestion_options_.picked_level;
+  }
+
   if (ingestion_options_.fail_if_not_bottommost_level &&
       target_level < cfd_->NumberLevels() - 1) {
     status = Status::TryAgain(
@@ -986,6 +994,7 @@ Status ExternalSstFileIngestionJob::AssignLevelAndSeqnoForIngestedFile(
   TEST_SYNC_POINT_CALLBACK(
       "ExternalSstFileIngestionJob::AssignLevelAndSeqnoForIngestedFile",
       &overlap_with_db);
+
   file_to_ingest->picked_level = target_level;
   if (overlap_with_db && *assigned_seqno == 0) {
     *assigned_seqno = last_seqno + 1;

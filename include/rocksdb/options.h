@@ -2057,6 +2057,9 @@ struct IngestExternalFileOptions {
   //
   // ingest_behind takes precedence over fail_if_not_bottommost_level.
   bool fail_if_not_bottommost_level = false;
+
+  // user-specified picked level, -1 means not specified
+  int picked_level;
 };
 
 enum TraceFilterType : uint64_t {

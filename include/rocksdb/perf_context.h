@@ -44,6 +44,8 @@ struct PerfContextByLevelBase {
 
   uint64_t block_cache_hit_count = 0;   // total number of block cache hits
   uint64_t block_cache_miss_count = 0;  // total number of block cache misses
+
+  uint64_t used_data_block_count = 0;  // total number of accessed data blocks
 };
 
 // A thread local context for gathering performance counter efficiently
