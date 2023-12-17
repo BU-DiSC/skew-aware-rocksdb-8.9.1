@@ -79,6 +79,7 @@ struct SstFileMetaData : public FileStorageInfo {
                   SequenceNumber _smallest_seqno, SequenceNumber _largest_seqno,
                   const std::string& _smallestkey,
                   const std::string& _largestkey, uint64_t _num_reads_sampled,
+                  uint64_t _num_point_reads, uint64_t _num_existing_point_reads,
                   bool _being_compacted, Temperature _temperature,
                   uint64_t _oldest_blob_file_number,
                   uint64_t _oldest_ancester_time, uint64_t _file_creation_time,
@@ -89,6 +90,8 @@ struct SstFileMetaData : public FileStorageInfo {
         smallestkey(_smallestkey),
         largestkey(_largestkey),
         num_reads_sampled(_num_reads_sampled),
+        num_point_reads(_num_point_reads),
+        num_existing_point_reads(_num_existing_point_reads),
         being_compacted(_being_compacted),
         num_entries(0),
         num_deletions(0),
@@ -123,6 +126,10 @@ struct SstFileMetaData : public FileStorageInfo {
   std::string smallestkey;            // Smallest user defined key in the file.
   std::string largestkey;             // Largest user defined key in the file.
   uint64_t num_reads_sampled = 0;     // How many times the file is read.
+  // How many times the file is read by a point query.
+  uint64_t num_point_reads = 0;
+  // How many times the file is read by a point query with a "Found" result.
+  uint64_t num_existing_point_reads = 0;
   bool being_compacted =
       false;  // true if the file is currently being compacted.
 

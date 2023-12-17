@@ -7486,6 +7486,8 @@ class LiveFileMetaDataJni : public JavaClass {
         static_cast<jlong>(live_file_meta_data->largest_seqno), jsmallest_key,
         jlargest_key,
         static_cast<jlong>(live_file_meta_data->num_reads_sampled),
+        static_cast<jlong>(live_file_meta_data->num_point_reads),
+        static_cast<jlong>(live_file_meta_data->num_existing_point_reads),
         static_cast<jboolean>(live_file_meta_data->being_compacted),
         static_cast<jlong>(live_file_meta_data->num_entries),
         static_cast<jlong>(live_file_meta_data->num_deletions));
@@ -7581,6 +7583,8 @@ class SstFileMetaDataJni : public JavaClass {
         static_cast<jint>(sst_file_meta_data->smallest_seqno),
         static_cast<jlong>(sst_file_meta_data->largest_seqno), jsmallest_key,
         jlargest_key, static_cast<jlong>(sst_file_meta_data->num_reads_sampled),
+        static_cast<jlong>(sst_file_meta_data->num_point_reads),
+        static_cast<jlong>(sst_file_meta_data->num_existing_point_reads),
         static_cast<jboolean>(sst_file_meta_data->being_compacted),
         static_cast<jlong>(sst_file_meta_data->num_entries),
         static_cast<jlong>(sst_file_meta_data->num_deletions));

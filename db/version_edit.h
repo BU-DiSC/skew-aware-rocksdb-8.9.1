@@ -163,15 +163,20 @@ struct FileDescriptor {
 };
 
 struct FileSampledStats {
-  FileSampledStats() : num_reads_sampled(0) {}
+  FileSampledStats()
+      : num_reads_sampled(0), num_point_reads(0), num_existing_point_reads(0) {}
   FileSampledStats(const FileSampledStats& other) { *this = other; }
   FileSampledStats& operator=(const FileSampledStats& other) {
     num_reads_sampled = other.num_reads_sampled.load();
+    num_point_reads = other.num_point_reads.load();
+    num_existing_point_reads = other.num_existing_point_reads.load();
     return *this;
   }
 
   // number of user reads to this file.
   mutable std::atomic<uint64_t> num_reads_sampled;
+  mutable std::atomic<uint64_t> num_point_reads;
+  mutable std::atomic<uint64_t> num_existing_point_reads;
 };
 
 struct FileMetaData {

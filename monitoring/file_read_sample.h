@@ -20,4 +20,13 @@ inline void sample_file_read_inc(FileMetaData* meta) {
   meta->stats.num_reads_sampled.fetch_add(kFileReadSampleRate,
                                           std::memory_order_relaxed);
 }
+
+inline void file_point_read_inc(FileMetaData* meta, uint64_t increment) {
+  meta->stats.num_point_reads.fetch_add(increment, std::memory_order_relaxed);
+}
+inline void file_existing_point_read_inc(FileMetaData* meta,
+                                         uint64_t increment) {
+  meta->stats.num_existing_point_reads.fetch_add(increment,
+                                                 std::memory_order_relaxed);
+}
 }  // namespace ROCKSDB_NAMESPACE

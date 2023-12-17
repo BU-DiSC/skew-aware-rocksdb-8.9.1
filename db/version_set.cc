@@ -1798,6 +1798,8 @@ void Version::GetColumnFamilyMetaData(ColumnFamilyMetaData* cf_meta) {
           file->fd.largest_seqno, file->smallest.user_key().ToString(),
           file->largest.user_key().ToString(),
           file->stats.num_reads_sampled.load(std::memory_order_relaxed),
+          file->stats.num_point_reads.load(std::memory_order_relaxed),
+          file->stats.num_existing_point_reads.load(std::memory_order_relaxed),
           file->being_compacted, file->temperature,
           file->oldest_blob_file_number, file->TryGetOldestAncesterTime(),
           file->TryGetFileCreationTime(), file->epoch_number,
@@ -2412,6 +2414,7 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
     if (get_context.sample()) {
       sample_file_read_inc(f->file_metadata);
     }
+    file_point_read_inc(f->file_metadata, 1);
 
     bool timer_enabled =
         GetPerfLevel() >= PerfLevel::kEnableTimeExceptForMutex &&
@@ -2451,6 +2454,7 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
         // TODO: update per-level perfcontext user_key_return_count for kMerge
         break;
       case GetContext::kFound:
+        file_existing_point_read_inc(f->file_metadata, 1);
         if (fp.GetHitFileLevel() == 0) {
           RecordTick(db_statistics_, GET_HIT_L0);
         } else if (fp.GetHitFileLevel() == 1) {
@@ -4954,6 +4958,12 @@ std::string Version::DebugString(bool hex, bool print_stats) const {
         r.append("(");
         r.append(std::to_string(
             files[i]->stats.num_reads_sampled.load(std::memory_order_relaxed)));
+        r.append(",");
+        r.append(std::to_string(
+            files[i]->stats.num_point_reads.load(std::memory_order_relaxed)));
+        r.append(",");
+        r.append(std::to_string(files[i]->stats.num_existing_point_reads.load(
+            std::memory_order_relaxed)));
         r.append(")");
       }
       r.append("\n");
@@ -7073,6 +7083,11 @@ void VersionSet::GetLiveFilesMetaData(std::vector<LiveFileMetaData>* metadata) {
         filemetadata.largest_seqno = file->fd.largest_seqno;
         filemetadata.num_reads_sampled =
             file->stats.num_reads_sampled.load(std::memory_order_relaxed);
+        filemetadata.num_point_reads =
+            file->stats.num_point_reads.load(std::memory_order_relaxed);
+        filemetadata.num_existing_point_reads =
+            file->stats.num_existing_point_reads.load(
+                std::memory_order_relaxed);
         filemetadata.being_compacted = file->being_compacted;
         filemetadata.num_entries = file->num_entries;
         filemetadata.num_deletions = file->num_deletions;
