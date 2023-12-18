@@ -32,6 +32,7 @@ Status CompactionOutputs::Finish(
     builder_->SetSeqnoTimeTableProperties(seqno_to_time_mapping_str,
                                           meta->oldest_ancester_time);
     s = builder_->Finish();
+    builder_->ResetFilterBitsPerKey(10.0);
 
   } else {
     builder_->Abandon();

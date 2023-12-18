@@ -50,6 +50,49 @@ namespace {
 // meanings.
 static constexpr uint32_t kMetadataLen = 5;
 
+void ConfigureBitsPerKey(double bits_per_key, int* millibits_per_key,
+                         int* whole_bits_per_key,
+                         double* desired_one_in_fp_rate) {
+  // Sanitize bits_per_key
+  if (bits_per_key < 0.5) {
+    // Round down to no filter
+    bits_per_key = 0;
+  } else if (bits_per_key < 1.0) {
+    // Minimum 1 bit per key (equiv) when creating filter
+    bits_per_key = 1.0;
+  } else if (!(bits_per_key < 100.0)) {  // including NaN
+    bits_per_key = 100.0;
+  }
+
+  // Includes a nudge toward rounding up, to ensure on all platforms
+  // that doubles specified with three decimal digits after the decimal
+  // point are interpreted accurately.
+  int local_millibits_per_key =
+      static_cast<int>(bits_per_key * 1000.0 + 0.500001);
+
+  if (millibits_per_key != nullptr) {
+    *millibits_per_key = local_millibits_per_key;
+  }
+
+  // For now configure Ribbon filter to match Bloom FP rate and save
+  // memory. (Ribbon bits per key will be ~30% less than Bloom bits per key
+  // for same FP rate.)
+  if (desired_one_in_fp_rate != nullptr) {
+    *desired_one_in_fp_rate =
+        1.0 / BloomMath::CacheLocalFpRate(
+                  bits_per_key,
+                  FastLocalBloomImpl::ChooseNumProbes(local_millibits_per_key),
+                  /*cache_line_bits*/ 512);
+  }
+
+  // For better or worse, this is a rounding up of a nudged rounding up,
+  // e.g. 7.4999999999999 will round up to 8, but that provides more
+  // predictability against small arithmetic errors in floating point.
+  if (whole_bits_per_key != nullptr) {
+    *whole_bits_per_key = (local_millibits_per_key + 500) / 1000;
+  }
+}
+
 Slice FinishAlwaysFalse(std::unique_ptr<const char[]>* /*buf*/) {
   // Missing metadata, treated as zero entries
   return Slice(nullptr, 0);
@@ -315,6 +358,10 @@ class FastLocalBloomBitsBuilder : public XXPH3FilterBitsBuilder {
                                detect_filter_construct_corruption),
         millibits_per_key_(millibits_per_key) {
     assert(millibits_per_key >= 1000);
+  }
+
+  void ResetFilterBitsPerKey(double bits_per_key) override {
+    ConfigureBitsPerKey(bits_per_key, &millibits_per_key_, nullptr, nullptr);
   }
 
   // No Copy allowed
@@ -612,6 +659,12 @@ class Standard128RibbonBitsBuilder : public XXPH3FilterBitsBuilder {
 
   virtual Slice Finish(std::unique_ptr<const char[]>* buf) override {
     return Finish(buf, nullptr);
+  }
+
+  void ResetFilterBitsPerKey(double bits_per_key) override {
+    ConfigureBitsPerKey(bits_per_key, nullptr, nullptr,
+                        &desired_one_in_fp_rate_);
+    bloom_fallback_.ResetFilterBitsPerKey(bits_per_key);
   }
 
   virtual Slice Finish(std::unique_ptr<const char[]>* buf,
@@ -1005,7 +1058,6 @@ class Standard128RibbonBitsReader : public BuiltinFilterBitsReader {
 };
 
 // ##################### Legacy Bloom implementation ################### //
-
 using LegacyBloomImpl = LegacyLocalityBloomImpl</*ExtraRotates*/ false>;
 
 class LegacyBloomBitsBuilder : public BuiltinFilterBitsBuilder {
@@ -1040,6 +1092,11 @@ class LegacyBloomBitsBuilder : public BuiltinFilterBitsBuilder {
   }
 
   size_t ApproximateNumEntries(size_t bytes) override;
+
+  void ResetFilterBitsPerKey(double bits_per_key) override {
+    ConfigureBitsPerKey(bits_per_key, nullptr, &bits_per_key_, nullptr);
+    num_probes_ = LegacyNoLocalityBloomImpl::ChooseNumProbes(bits_per_key_);
+  }
 
  private:
   int bits_per_key_;
@@ -1328,35 +1385,8 @@ const char* BuiltinFilterPolicy::CompatibilityName() const {
 
 BloomLikeFilterPolicy::BloomLikeFilterPolicy(double bits_per_key)
     : warned_(false), aggregate_rounding_balance_(0) {
-  // Sanitize bits_per_key
-  if (bits_per_key < 0.5) {
-    // Round down to no filter
-    bits_per_key = 0;
-  } else if (bits_per_key < 1.0) {
-    // Minimum 1 bit per key (equiv) when creating filter
-    bits_per_key = 1.0;
-  } else if (!(bits_per_key < 100.0)) {  // including NaN
-    bits_per_key = 100.0;
-  }
-
-  // Includes a nudge toward rounding up, to ensure on all platforms
-  // that doubles specified with three decimal digits after the decimal
-  // point are interpreted accurately.
-  millibits_per_key_ = static_cast<int>(bits_per_key * 1000.0 + 0.500001);
-
-  // For now configure Ribbon filter to match Bloom FP rate and save
-  // memory. (Ribbon bits per key will be ~30% less than Bloom bits per key
-  // for same FP rate.)
-  desired_one_in_fp_rate_ =
-      1.0 / BloomMath::CacheLocalFpRate(
-                bits_per_key,
-                FastLocalBloomImpl::ChooseNumProbes(millibits_per_key_),
-                /*cache_line_bits*/ 512);
-
-  // For better or worse, this is a rounding up of a nudged rounding up,
-  // e.g. 7.4999999999999 will round up to 8, but that provides more
-  // predictability against small arithmetic errors in floating point.
-  whole_bits_per_key_ = (millibits_per_key_ + 500) / 1000;
+  ConfigureBitsPerKey(bits_per_key, &millibits_per_key_, &whole_bits_per_key_,
+                      &desired_one_in_fp_rate_);
 }
 
 BloomLikeFilterPolicy::~BloomLikeFilterPolicy() {}

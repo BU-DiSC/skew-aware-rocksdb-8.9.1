@@ -210,6 +210,8 @@ class TableBuilder {
 
   virtual uint64_t GetTailSize() const { return 0; }
 
+  virtual void ResetFilterBitsPerKey(double /* bits_per_key */) { return; }
+
   // If the user defined table properties collector suggest the file to
   // be further compacted.
   virtual bool NeedCompact() const { return false; }

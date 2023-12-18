@@ -2038,6 +2038,14 @@ bool BlockBasedTableBuilder::IsEmpty() const {
   return rep_->props.num_entries == 0 && rep_->props.num_range_deletions == 0;
 }
 
+void BlockBasedTableBuilder::ResetFilterBitsPerKey(double bits_per_key) {
+  if (rep_->filter_builder == nullptr || rep_->filter_builder->IsEmpty()) {
+    // No filter block needed
+    return;
+  }
+  rep_->filter_builder->ResetFilterBitsPerKey(bits_per_key);
+}
+
 uint64_t BlockBasedTableBuilder::FileSize() const { return rep_->offset; }
 
 uint64_t BlockBasedTableBuilder::EstimatedFileSize() const {

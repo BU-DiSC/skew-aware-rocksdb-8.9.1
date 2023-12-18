@@ -54,6 +54,8 @@ class FilterBitsBuilder {
     return Finish(buf);
   }
 
+  virtual void ResetFilterBitsPerKey(double /*bits_per_key*/) {}
+
   // Verify the filter returned from calling FilterBitsBuilder::Finish.
   // The function returns Status::Corruption() if there is any corruption in the
   // constructed filter or Status::OK() otherwise.
@@ -78,6 +80,11 @@ class FilterBitsBuilder {
   // <= the specified number of bytes. Callers (including RocksDB) should
   // only use this result for optimizing performance and not as a guarantee.
   virtual size_t ApproximateNumEntries(size_t bytes) = 0;
+
+  // See detailed introduction in BloomLikeFilterPolicy
+  int millibits_per_key_;
+  int whole_bits_per_key_;
+  double desired_one_in_fp_rate_;
 };
 
 // A class that checks if a key can be in filter

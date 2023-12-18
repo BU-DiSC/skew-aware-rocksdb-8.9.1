@@ -65,6 +65,10 @@ class FullFilterBlockBuilder : public FilterBlockBuilder {
     return filter_bits_builder_->MaybePostVerify(filter_content);
   }
 
+  void ResetFilterBitsPerKey(double bits_per_key) override {
+    filter_bits_builder_->ResetFilterBitsPerKey(bits_per_key);
+  }
+
  protected:
   virtual void AddKey(const Slice& key);
   std::unique_ptr<FilterBitsBuilder> filter_bits_builder_;

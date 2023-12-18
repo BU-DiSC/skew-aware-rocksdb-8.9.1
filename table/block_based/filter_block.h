@@ -77,7 +77,9 @@ class FilterBlockBuilder {
   // This is called when finishes using the FilterBitsBuilder
   // in order to release memory usage and cache charge
   // associated with it timely
-  virtual void ResetFilterBitsBuilder() {}
+  virtual void ResetFilterBitsBuilder(){};
+
+  virtual void ResetFilterBitsPerKey(double /*bits_per_key*/){};
 
   // To optionally post-verify the filter returned from
   // FilterBlockBuilder::Finish.
