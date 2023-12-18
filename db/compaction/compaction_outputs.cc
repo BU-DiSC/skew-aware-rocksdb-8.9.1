@@ -11,6 +11,7 @@
 #include "db/compaction/compaction_outputs.h"
 
 #include "db/builder.h"
+#include "monitoring/file_read_sample.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -50,6 +51,10 @@ Status CompactionOutputs::Finish(
     meta->marked_for_compaction = builder_->NeedCompact();
     meta->user_defined_timestamps_persisted = static_cast<bool>(
         builder_->GetTableProperties().user_defined_timestamps_persisted);
+    file_point_read_inc(meta,
+                        (uint64_t)round(current_output().agg_num_point_reads));
+    file_existing_point_read_inc(
+        meta, (uint64_t)round(current_output().agg_num_existing_point_reads));
   }
   current_output().finished = true;
   stats_.bytes_written += current_bytes;
@@ -405,6 +410,9 @@ Status CompactionOutputs::AddToOutput(
   assert(builder_ != nullptr);
   const Slice& value = c_iter.value();
   s = current_output().validator.Add(key, value);
+  current_output().agg_num_point_reads += c_iter.GetAvgNumPointReads();
+  current_output().agg_num_existing_point_reads +=
+      c_iter.GetAvgNumExistingPointReads();
   if (!s.ok()) {
     return s;
   }

@@ -36,6 +36,14 @@ class IteratorWrapperBase {
     }
   }
 
+  void SetAvgNumPointReads(double avg_num_point_reads) {
+    iter_->SetAvgNumPointReads(avg_num_point_reads);
+  }
+
+  void SetAvgNumExistingPointReads(double avg_num_existing_point_reads) {
+    iter_->SetAvgNumExistingPointReads(avg_num_existing_point_reads);
+  }
+
   // Set the underlying Iterator to _iter and return
   // previous underlying Iterator.
   InternalIteratorBase<TValue>* Set(InternalIteratorBase<TValue>* _iter) {

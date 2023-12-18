@@ -40,6 +40,8 @@ class CompactionOutputs {
     OutputValidator validator;
     bool finished;
     std::shared_ptr<const TableProperties> table_properties;
+    double agg_num_point_reads = 0.0;
+    double agg_num_existing_point_reads = 0.0;
   };
 
   CompactionOutputs() = delete;

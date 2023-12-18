@@ -274,6 +274,11 @@ class CompactionIterator {
   }
   Status InputStatus() const { return input_.status(); }
 
+  double GetAvgNumPointReads() const { return input_.GetAvgNumPointReads(); }
+  double GetAvgNumExistingPointReads() const {
+    return input_.GetAvgNumExistingPointReads();
+  }
+
   bool IsDeleteRangeSentinelKey() const { return is_range_del_; }
 
  private:

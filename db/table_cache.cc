@@ -264,6 +264,23 @@ InternalIterator* TableCache::NewIterator(
     }
 
     if (for_compaction) {
+      uint64_t num_entries_in_filter =
+          file_meta.num_entries - file_meta.num_range_deletions;
+      if (num_entries_in_filter > 0) {
+        uint64_t num_point_reads =
+            file_meta.stats.num_point_reads.load(std::memory_order_relaxed);
+        uint64_t num_existing_point_reads =
+            file_meta.stats.num_existing_point_reads.load(
+                std::memory_order_relaxed);
+        if (num_point_reads > 0) {
+          result->SetAvgNumPointReads(num_point_reads * 1.0 /
+                                      num_entries_in_filter);
+          if (num_existing_point_reads > 0) {
+            result->SetAvgNumExistingPointReads(num_existing_point_reads * 1.0 /
+                                                num_entries_in_filter);
+          }
+        }
+      }
       table_reader->SetupForCompaction();
     }
     if (table_reader_ptr != nullptr) {

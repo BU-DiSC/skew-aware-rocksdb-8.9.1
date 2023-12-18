@@ -43,6 +43,20 @@ class InternalIteratorBase : public Cleanable {
 
   virtual ~InternalIteratorBase() {}
 
+  double GetAvgNumPointReads() const { return avg_num_point_reads_; }
+
+  double GetAvgNumExistingPointReads() const {
+    return avg_num_existing_point_reads_;
+  }
+
+  void SetAvgNumPointReads(double avg_num_point_reads) {
+    avg_num_point_reads_ = avg_num_point_reads;
+  }
+
+  void SetAvgNumExistingPointReads(double avg_num_existing_point_reads) {
+    avg_num_existing_point_reads_ = avg_num_existing_point_reads;
+  }
+
   // This iterator will only process range tombstones with sequence
   // number <= `read_seqno`.
   // Noop for most child classes.
@@ -214,6 +228,10 @@ class InternalIteratorBase : public Cleanable {
       Prev();
     }
   }
+
+ private:
+  double avg_num_point_reads_ = 0.0;
+  double avg_num_existing_point_reads_ = 0.0;
 };
 
 using InternalIterator = InternalIteratorBase<Slice>;

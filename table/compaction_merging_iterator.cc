@@ -23,6 +23,17 @@ class CompactionMergingIterator : public InternalIterator {
     for (int i = 0; i < n; i++) {
       children_[i].level = i;
       children_[i].iter.Set(children[i]);
+      if (i != n - 1) {
+        children_[i].iter.SetAvgNumPointReads(
+            children[i]->GetAvgNumExistingPointReads());
+        children_[i].iter.SetAvgNumExistingPointReads(
+            children[i]->GetAvgNumExistingPointReads());
+      } else {
+        children_[i].iter.SetAvgNumPointReads(
+            children[i]->GetAvgNumPointReads());
+        children_[i].iter.SetAvgNumExistingPointReads(
+            children[i]->GetAvgNumExistingPointReads());
+      }
       assert(children_[i].type == HeapItem::ITERATOR);
     }
     assert(range_tombstones.size() == static_cast<size_t>(n));
