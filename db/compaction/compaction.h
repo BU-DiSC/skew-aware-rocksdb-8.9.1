@@ -121,6 +121,10 @@ class Compaction {
 
   int start_level() const { return start_level_; }
 
+  uint64_t max_num_entries_in_output_level() const {
+    return max_num_entries_in_output_level_;
+  }
+
   // Outputs will go to this level
   int output_level() const { return output_level_; }
 
@@ -144,6 +148,8 @@ class Compaction {
 
   // Returns input version of the compaction
   Version* input_version() const { return input_version_; }
+
+  VersionStorageInfo* input_vstorage() const { return input_vstorage_; }
 
   // Returns the ColumnFamilyData associated with the compaction.
   ColumnFamilyData* column_family_data() const { return cfd_; }
@@ -491,6 +497,7 @@ class Compaction {
   ColumnFamilyData* cfd_;
   Arena arena_;  // Arena used to allocate space for file_levels_
 
+  uint64_t max_num_entries_in_output_level_;
   const uint32_t output_path_id_;
   CompressionType output_compression_;
   CompressionOptions output_compression_opts_;

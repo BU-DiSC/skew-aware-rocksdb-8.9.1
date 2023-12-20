@@ -78,6 +78,8 @@ struct OptionsHelper {
       compaction_stop_style_to_string;
   static std::map<Temperature, std::string> temperature_to_string;
   static std::unordered_map<std::string, ChecksumType> checksum_type_string_map;
+  static std::unordered_map<std::string, BitsPerKeyAllocationType>
+      bpk_alloc_type_string_map;
   static std::unordered_map<std::string, CompressionType>
       compression_type_string_map;
   static std::unordered_map<std::string, PrepopulateBlobCache>
@@ -100,6 +102,8 @@ static auto& compaction_stop_style_to_string =
     OptionsHelper::compaction_stop_style_to_string;
 static auto& temperature_to_string = OptionsHelper::temperature_to_string;
 static auto& checksum_type_string_map = OptionsHelper::checksum_type_string_map;
+static auto& bpk_alloc_type_string_map =
+    OptionsHelper::bpk_alloc_type_string_map;
 static auto& compaction_stop_style_string_map =
     OptionsHelper::compaction_stop_style_string_map;
 static auto& compression_type_string_map =

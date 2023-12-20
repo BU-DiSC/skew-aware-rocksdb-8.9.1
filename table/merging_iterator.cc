@@ -67,6 +67,9 @@ class MergingIterator : public InternalIterator {
     for (int i = 0; i < n; i++) {
       children_[i].level = i;
       children_[i].iter.Set(children[i]);
+      children_[i].iter.SetAvgNumPointReads(children[i]->GetAvgNumPointReads());
+      children_[i].iter.SetAvgNumExistingPointReads(
+          children[i]->GetAvgNumExistingPointReads());
     }
   }
 

@@ -1680,9 +1680,10 @@ Status DBImpl::WriteLevel0TableForRecovery(int job_id, ColumnFamilyData* cfd,
       const ReadOptions read_option(Env::IOActivity::kDBOpen);
       uint64_t num_input_entries = 0;
       s = BuildTable(
-          dbname_, versions_.get(), immutable_db_options_, tboptions,
-          file_options_for_compaction_, read_option, cfd->table_cache(),
-          iter.get(), std::move(range_del_iters), &meta, &blob_file_additions,
+          dbname_, versions_.get(), version->storage_info(),
+          immutable_db_options_, tboptions, file_options_for_compaction_,
+          read_option, cfd->table_cache(), iter.get(),
+          std::move(range_del_iters), &meta, &blob_file_additions,
           snapshot_seqs, earliest_write_conflict_snapshot, kMaxSequenceNumber,
           snapshot_checker, paranoid_file_checks, cfd->internal_stats(), &io_s,
           io_tracer_, BlobFileCreationReason::kRecovery,

@@ -12,8 +12,12 @@
 
 #include "db/builder.h"
 #include "monitoring/file_read_sample.h"
+#include "table/block_based/block_based_table_factory.h"
+#include "table/block_based/filter_policy_internal.h"
 
 namespace ROCKSDB_NAMESPACE {
+
+const double log_2_squared = std::pow(std::log(2), 2);
 
 void CompactionOutputs::NewBuilder(const TableBuilderOptions& tboptions) {
   builder_.reset(NewTableBuilder(tboptions, file_writer_.get()));
@@ -32,8 +36,21 @@ Status CompactionOutputs::Finish(
         meta->fd.largest_seqno, meta->file_creation_time);
     builder_->SetSeqnoTimeTableProperties(seqno_to_time_mapping_str,
                                           meta->oldest_ancester_time);
+    file_point_read_inc(meta,
+                        (uint64_t)round(current_output().agg_num_point_reads));
+    file_existing_point_read_inc(
+        meta, (uint64_t)round(current_output().agg_num_existing_point_reads));
+    double new_bits_per_key = 0.0;
+    bpk_alloc_helper_.PrepareBpkAllocation(compaction_->immutable_options(),
+                                           compaction_->input_vstorage());
+    bool reset_flag = bpk_alloc_helper_.IfNeedAllocateBitsPerKey(
+        *meta, compaction_->max_num_entries_in_output_level(),
+        &new_bits_per_key);
+    if (reset_flag) {
+      builder_->ResetFilterBitsPerKey(new_bits_per_key);
+    }
+
     s = builder_->Finish();
-    builder_->ResetFilterBitsPerKey(10.0);
 
   } else {
     builder_->Abandon();
@@ -51,10 +68,6 @@ Status CompactionOutputs::Finish(
     meta->marked_for_compaction = builder_->NeedCompact();
     meta->user_defined_timestamps_persisted = static_cast<bool>(
         builder_->GetTableProperties().user_defined_timestamps_persisted);
-    file_point_read_inc(meta,
-                        (uint64_t)round(current_output().agg_num_point_reads));
-    file_existing_point_read_inc(
-        meta, (uint64_t)round(current_output().agg_num_existing_point_reads));
   }
   current_output().finished = true;
   stats_.bytes_written += current_bytes;
@@ -798,6 +811,8 @@ CompactionOutputs::CompactionOutputs(const Compaction* compaction,
   }
 
   level_ptrs_ = std::vector<size_t>(compaction_->number_levels(), 0);
+
+  bpk_alloc_helper_ = BitsPerKeyAllocHelper();
 }
 
 }  // namespace ROCKSDB_NAMESPACE

@@ -32,6 +32,7 @@ struct DBOptions;
 // be converted to/from strings and compared.
 enum class OptionType {
   kBoolean,
+  kBitsPerKeyAllocationType,
   kInt,
   kInt32T,
   kInt64T,

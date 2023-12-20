@@ -357,6 +357,12 @@ std::unordered_map<std::string, ChecksumType>
                                                {"kxxHash64", kxxHash64},
                                                {"kXXH3", kXXH3}};
 
+std::unordered_map<std::string, BitsPerKeyAllocationType>
+    OptionsHelper::bpk_alloc_type_string_map = {
+        {"kDefaultBpkAlloc", kDefaultBpkAlloc},
+        {"kMonkeyBpkAlloc", kMonkeyBpkAlloc},
+        {"kWorkloadAwareBpkAlloc", kWorkloadAwareBpkAlloc}};
+
 std::unordered_map<std::string, CompressionType>
     OptionsHelper::compression_type_string_map = {
         {"kNoCompression", kNoCompression},
@@ -458,6 +464,10 @@ static bool ParseOptionHelper(void* opt_address, const OptionType& opt_type,
     case OptionType::kChecksumType:
       return ParseEnum<ChecksumType>(checksum_type_string_map, value,
                                      static_cast<ChecksumType*>(opt_address));
+    case OptionType::kBitsPerKeyAllocationType:
+      return ParseEnum<BitsPerKeyAllocationType>(
+          bpk_alloc_type_string_map, value,
+          static_cast<BitsPerKeyAllocationType*>(opt_address));
     case OptionType::kEncodingType:
       return ParseEnum<EncodingType>(encoding_type_string_map, value,
                                      static_cast<EncodingType*>(opt_address));
@@ -552,6 +562,10 @@ bool SerializeSingleOptionHelper(const void* opt_address,
       return SerializeEnum<ChecksumType>(
           checksum_type_string_map,
           *static_cast<const ChecksumType*>(opt_address), value);
+    case OptionType::kBitsPerKeyAllocationType:
+      return SerializeEnum<BitsPerKeyAllocationType>(
+          bpk_alloc_type_string_map,
+          *static_cast<const BitsPerKeyAllocationType*>(opt_address), value);
     case OptionType::kEncodingType:
       return SerializeEnum<EncodingType>(
           encoding_type_string_map,
@@ -1196,6 +1210,8 @@ static bool AreOptionsEqual(OptionType type, const void* this_offset,
       return IsOptionEqual<CompressionType>(this_offset, that_offset);
     case OptionType::kChecksumType:
       return IsOptionEqual<ChecksumType>(this_offset, that_offset);
+    case OptionType::kBitsPerKeyAllocationType:
+      return IsOptionEqual<BitsPerKeyAllocationType>(this_offset, that_offset);
     case OptionType::kEncodingType:
       return IsOptionEqual<EncodingType>(this_offset, that_offset);
     case OptionType::kEncodedString:

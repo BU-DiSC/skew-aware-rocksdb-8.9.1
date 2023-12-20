@@ -1385,6 +1385,7 @@ const char* BuiltinFilterPolicy::CompatibilityName() const {
 
 BloomLikeFilterPolicy::BloomLikeFilterPolicy(double bits_per_key)
     : warned_(false), aggregate_rounding_balance_(0) {
+  origin_bits_per_key_ = bits_per_key;
   ConfigureBitsPerKey(bits_per_key, &millibits_per_key_, &whole_bits_per_key_,
                       &desired_one_in_fp_rate_);
 }

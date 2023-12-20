@@ -367,9 +367,21 @@ Compaction::Compaction(
   // setup input_levels_
   {
     input_levels_.resize(num_input_levels());
+    max_num_entries_in_output_level_ = 0;
     for (size_t which = 0; which < num_input_levels(); which++) {
       DoGenerateLevelFilesBrief(&input_levels_[which], inputs_[which].files,
                                 &arena_);
+      if (inputs_[which].level != output_level_) {
+        for (FileMetaData* meta : inputs_[which].files) {
+          max_num_entries_in_output_level_ +=
+              meta->num_entries - meta->num_range_deletions;
+        }
+      }
+      for (const FileMetaData* meta :
+           input_vstorage_->LevelFiles(output_level_)) {
+        max_num_entries_in_output_level_ +=
+            meta->num_entries - meta->num_range_deletions;
+      }
     }
   }
 

@@ -474,15 +474,15 @@ class Repairer {
 
       SeqnoToTimeMapping empty_seqno_to_time_mapping;
       status = BuildTable(
-          dbname_, /* versions */ nullptr, immutable_db_options_, tboptions,
-          file_options_, read_options, table_cache_.get(), iter.get(),
-          std::move(range_del_iters), &meta, nullptr /* blob_file_additions */,
-          {}, kMaxSequenceNumber, kMaxSequenceNumber, snapshot_checker,
-          false /* paranoid_file_checks*/, nullptr /* internal_stats */, &io_s,
-          nullptr /*IOTracer*/, BlobFileCreationReason::kRecovery,
-          empty_seqno_to_time_mapping, nullptr /* event_logger */,
-          0 /* job_id */, Env::IO_HIGH, nullptr /* table_properties */,
-          write_hint);
+          dbname_, /* versions */ nullptr, nullptr, immutable_db_options_,
+          tboptions, file_options_, read_options, table_cache_.get(),
+          iter.get(), std::move(range_del_iters), &meta,
+          nullptr /* blob_file_additions */, {}, kMaxSequenceNumber,
+          kMaxSequenceNumber, snapshot_checker, false /* paranoid_file_checks*/,
+          nullptr /* internal_stats */, &io_s, nullptr /*IOTracer*/,
+          BlobFileCreationReason::kRecovery, empty_seqno_to_time_mapping,
+          nullptr /* event_logger */, 0 /* job_id */, Env::IO_HIGH,
+          nullptr /* table_properties */, write_hint);
       ROCKS_LOG_INFO(db_options_.info_log,
                      "Log #%" PRIu64 ": %d ops saved to Table #%" PRIu64 " %s",
                      log, counter, meta.fd.GetNumber(),

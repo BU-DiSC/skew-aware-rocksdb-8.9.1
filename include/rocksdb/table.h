@@ -125,6 +125,12 @@ struct CacheUsageOptions {
   std::map<CacheEntryRole, CacheEntryRoleOptions> options_overrides;
 };
 
+enum BitsPerKeyAllocationType : char {
+  kDefaultBpkAlloc = 0x1,
+  kMonkeyBpkAlloc = 0x2,
+  kWorkloadAwareBpkAlloc = 0x3,
+};
+
 // For advanced user only
 struct BlockBasedTableOptions {
   static const char* kName() { return "BlockTableOptions"; };
@@ -255,6 +261,9 @@ struct BlockBasedTableOptions {
   // protected with this checksum type. Old table files will still be readable,
   // even though they have different checksum type.
   ChecksumType checksum = kXXH3;
+
+  BitsPerKeyAllocationType bpk_alloc_type =
+      BitsPerKeyAllocationType::kDefaultBpkAlloc;
 
   // Disable block cache. If this is set to true,
   // then no block cache should be used, and the block_cache should

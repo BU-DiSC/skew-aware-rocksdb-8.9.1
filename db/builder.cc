@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "db/blob/blob_file_builder.h"
+#include "db/bpk_alloc_helper.h"
 #include "db/compaction/compaction_iterator.h"
 #include "db/dbformat.h"
 #include "db/event_helpers.h"
@@ -56,9 +57,10 @@ TableBuilder* NewTableBuilder(const TableBuilderOptions& tboptions,
 
 Status BuildTable(
     const std::string& dbname, VersionSet* versions,
-    const ImmutableDBOptions& db_options, const TableBuilderOptions& tboptions,
-    const FileOptions& file_options, const ReadOptions& read_options,
-    TableCache* table_cache, InternalIterator* iter,
+    VersionStorageInfo* vstorage, const ImmutableDBOptions& db_options,
+    const TableBuilderOptions& tboptions, const FileOptions& file_options,
+    const ReadOptions& read_options, TableCache* table_cache,
+    InternalIterator* iter,
     std::vector<std::unique_ptr<FragmentedRangeTombstoneIterator>>
         range_del_iters,
     FileMetaData* meta, std::vector<BlobFileAddition>* blob_file_additions,
@@ -213,6 +215,12 @@ Status BuildTable(
 
     std::string key_after_flush_buf;
     c_iter.SeekToFirst();
+
+    double agg_num_point_reads = 0;
+    double agg_num_existing_point_reads = 0;
+
+    BitsPerKeyAllocHelper bpk_alloc_helper;
+
     for (; c_iter.Valid(); c_iter.Next()) {
       const Slice& key = c_iter.key();
       const Slice& value = c_iter.value();
@@ -236,6 +244,8 @@ Status BuildTable(
         break;
       }
       builder->Add(key_after_flush, value);
+      agg_num_point_reads += c_iter.GetAvgNumPointReads();
+      agg_num_existing_point_reads += c_iter.GetAvgNumExistingPointReads();
 
       s = meta->UpdateBoundaries(key_after_flush, value, ikey.sequence,
                                  ikey.type);
@@ -303,8 +313,20 @@ Status BuildTable(
           ioptions.compaction_style == CompactionStyle::kCompactionStyleFIFO
               ? meta->file_creation_time
               : meta->oldest_ancester_time);
+      meta->stats.num_point_reads.store((uint64_t)round(agg_num_point_reads));
+      meta->stats.num_existing_point_reads.store(
+          (uint64_t)round(agg_num_existing_point_reads));
+
+      bpk_alloc_helper.PrepareBpkAllocation(&tboptions.ioptions, vstorage);
+      double new_bits_per_key = 0.0;
+      if (bpk_alloc_helper.IfNeedAllocateBitsPerKey(*meta, *num_input_entries,
+                                                    &new_bits_per_key)) {
+        builder->ResetFilterBitsPerKey(new_bits_per_key);
+      }
       s = builder->Finish();
     }
+    agg_num_point_reads = 0;
+    agg_num_existing_point_reads = 0;
     if (io_status->ok()) {
       *io_status = builder->io_status();
     }

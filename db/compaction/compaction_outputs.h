@@ -11,6 +11,7 @@
 #pragma once
 
 #include "db/blob/blob_garbage_meter.h"
+#include "db/bpk_alloc_helper.h"
 #include "db/compaction/compaction.h"
 #include "db/compaction/compaction_iterator.h"
 #include "db/internal_stats.h"
@@ -367,6 +368,8 @@ class CompactionOutputs {
   // range tombstone added to output file within each subcompaction is in
   // increasing key range.
   std::vector<size_t> level_ptrs_;
+
+  BitsPerKeyAllocHelper bpk_alloc_helper_;
 };
 
 // helper struct to concatenate the last level and penultimate level outputs

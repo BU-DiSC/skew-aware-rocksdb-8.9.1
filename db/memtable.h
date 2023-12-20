@@ -505,6 +505,14 @@ class MemTable {
 
   uint64_t GetID() const { return id_; }
 
+  uint64_t num_point_reads() const {
+    return num_point_reads_.load(std::memory_order_relaxed);
+  }
+
+  uint64_t num_existing_point_reads() const {
+    return num_existing_point_reads_.load(std::memory_order_relaxed);
+  }
+
   void SetFlushCompleted(bool completed) { flush_completed_ = completed; }
 
   uint64_t GetFileNumber() const { return file_number_; }
@@ -578,6 +586,9 @@ class MemTable {
   std::atomic<uint64_t> num_entries_;
   std::atomic<uint64_t> num_deletes_;
   std::atomic<uint64_t> num_range_deletes_;
+
+  std::atomic<uint64_t> num_point_reads_;
+  std::atomic<uint64_t> num_existing_point_reads_;
 
   // Dynamically changeable memtable option
   std::atomic<size_t> write_buffer_size_;

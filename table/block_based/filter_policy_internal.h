@@ -203,6 +203,8 @@ class BloomLikeFilterPolicy : public BuiltinFilterPolicy {
   // Essentially for testing only: legacy whole bits/key
   int GetWholeBitsPerKey() const { return whole_bits_per_key_; }
 
+  double GetBitsPerKey() const { return origin_bits_per_key_; }
+
   // All the different underlying implementations that a BloomLikeFilterPolicy
   // might use, as a configuration string name for a testing mode for
   // "always use this implementation." Only appropriate for unit tests.
@@ -235,6 +237,8 @@ class BloomLikeFilterPolicy : public BuiltinFilterPolicy {
   // compatibility issue with fractional bits per key, but preserving old
   // behavior with format_version < 5 just in case.)
   int whole_bits_per_key_;
+
+  double origin_bits_per_key_;
 
   // For configuring Ribbon filter: a desired value for 1/fp_rate. For
   // example, 100 -> 1% fp rate.

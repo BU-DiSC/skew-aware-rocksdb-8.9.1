@@ -385,6 +385,18 @@ class MemTableIterator : public InternalIterator {
       iter_ = mem.table_->GetIterator(arena);
     }
     status_.PermitUncheckedError();
+
+    if (mem.num_entries_ > mem.num_range_deletes_) {
+      if (mem.num_point_reads_ > 0) {
+        SetAvgNumPointReads(mem.num_point_reads_ * 1.0 /
+                            (mem.num_entries_ - mem.num_range_deletes_));
+      }
+      if (mem.num_existing_point_reads_ > 0) {
+        SetAvgNumExistingPointReads(
+            mem.num_existing_point_reads_ * 1.0 /
+            (mem.num_entries_ - mem.num_range_deletes_));
+      }
+    }
   }
   // No copying allowed
   MemTableIterator(const MemTableIterator&) = delete;
@@ -1293,6 +1305,10 @@ bool MemTable::Get(const LookupKey& key, std::string* value,
     *s = Status::MergeInProgress();
   }
   PERF_COUNTER_ADD(get_from_memtable_count, 1);
+  num_point_reads_.fetch_add(1);
+  if (found_final_value) {
+    num_existing_point_reads_.fetch_add(1);
+  }
   return found_final_value;
 }
 

@@ -52,9 +52,10 @@ TableBuilder* NewTableBuilder(const TableBuilderOptions& tboptions,
 //    by column_family_id, or empty string if unknown.
 extern Status BuildTable(
     const std::string& dbname, VersionSet* versions,
-    const ImmutableDBOptions& db_options, const TableBuilderOptions& tboptions,
-    const FileOptions& file_options, const ReadOptions& read_options,
-    TableCache* table_cache, InternalIterator* iter,
+    VersionStorageInfo* vstorage, const ImmutableDBOptions& db_options,
+    const TableBuilderOptions& tboptions, const FileOptions& file_options,
+    const ReadOptions& read_options, TableCache* table_cache,
+    InternalIterator* iter,
     std::vector<std::unique_ptr<FragmentedRangeTombstoneIterator>>
         range_del_iters,
     FileMetaData* meta, std::vector<BlobFileAddition>* blob_file_additions,
