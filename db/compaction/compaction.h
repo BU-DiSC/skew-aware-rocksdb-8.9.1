@@ -149,7 +149,7 @@ class Compaction {
   // Returns input version of the compaction
   Version* input_version() const { return input_version_; }
 
-  VersionStorageInfo* input_vstorage() const { return input_vstorage_; }
+  const VersionStorageInfo* input_vstorage() const { return input_vstorage_; }
 
   // Returns the ColumnFamilyData associated with the compaction.
   ColumnFamilyData* column_family_data() const { return cfd_; }

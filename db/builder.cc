@@ -57,10 +57,9 @@ TableBuilder* NewTableBuilder(const TableBuilderOptions& tboptions,
 
 Status BuildTable(
     const std::string& dbname, VersionSet* versions,
-    VersionStorageInfo* vstorage, const ImmutableDBOptions& db_options,
-    const TableBuilderOptions& tboptions, const FileOptions& file_options,
-    const ReadOptions& read_options, TableCache* table_cache,
-    InternalIterator* iter,
+    const ImmutableDBOptions& db_options, const TableBuilderOptions& tboptions,
+    const FileOptions& file_options, const ReadOptions& read_options,
+    TableCache* table_cache, InternalIterator* iter,
     std::vector<std::unique_ptr<FragmentedRangeTombstoneIterator>>
         range_del_iters,
     FileMetaData* meta, std::vector<BlobFileAddition>* blob_file_additions,
@@ -316,13 +315,16 @@ Status BuildTable(
       meta->stats.num_point_reads.store((uint64_t)round(agg_num_point_reads));
       meta->stats.num_existing_point_reads.store(
           (uint64_t)round(agg_num_existing_point_reads));
-
-      bpk_alloc_helper.PrepareBpkAllocation(&tboptions.ioptions, vstorage);
-      double new_bits_per_key = 0.0;
-      if (bpk_alloc_helper.IfNeedAllocateBitsPerKey(*meta, *num_input_entries,
-                                                    &new_bits_per_key)) {
-        builder->ResetFilterBitsPerKey(new_bits_per_key);
+      if (version) {
+        bpk_alloc_helper.PrepareBpkAllocation(&tboptions.ioptions,
+                                              version->storage_info());
+        double new_bits_per_key = 0.0;
+        if (bpk_alloc_helper.IfNeedAllocateBitsPerKey(*meta, *num_input_entries,
+                                                      &new_bits_per_key)) {
+          builder->ResetFilterBitsPerKey(new_bits_per_key);
+        }
       }
+
       s = builder->Finish();
     }
     agg_num_point_reads = 0;
