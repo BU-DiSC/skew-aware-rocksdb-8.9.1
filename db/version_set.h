@@ -193,6 +193,13 @@ class VersionStorageInfo {
   // Update the accumulated stats from a file-meta.
   void UpdateAccumulatedStats(FileMetaData* file_meta);
 
+  void UpdateNumPointReadsAndExistingPointReads(
+      uint64_t added_num_existing_point_reads) const {
+    accumulated_num_point_reads_.fetch_add(added_num_existing_point_reads);
+    accumulated_num_existing_point_reads_.fetch_add(
+        added_num_existing_point_reads);
+  }
+
   // Decrease the current stat from a to-be-deleted file-meta
   void RemoveCurrentStats(FileMetaData* file_meta);
 
@@ -611,6 +618,10 @@ class VersionStorageInfo {
                                      const Slice& largest_user_key,
                                      int last_level, int last_l0_idx);
 
+  uint64_t GetAccumulatedNumPointReads() const {
+    return accumulated_num_point_reads_;
+  }
+
  private:
   void ComputeCompensatedSizes();
   void UpdateNumNonEmptyLevels();
@@ -733,6 +744,9 @@ class VersionStorageInfo {
 
   // Compact cursors for round-robin compactions in each level
   std::vector<InternalKey> compact_cursor_;
+
+  mutable std::atomic<uint64_t> accumulated_num_point_reads_;
+  mutable std::atomic<uint64_t> accumulated_num_existing_point_reads_;
 
   // the following are the sampled temporary stats.
   // the current accumulated size of sampled files.

@@ -42,6 +42,8 @@ class SequenceIterWrapper : public InternalIterator {
       num_itered_++;
     }
     inner_iter_->Next();
+    SetAvgNumPointReads(inner_iter_->GetAvgNumPointReads());
+    SetAvgNumExistingPointReads(inner_iter_->GetAvgNumExistingPointReads());
   }
   void Seek(const Slice& target) override {
     if (!need_count_entries_) {

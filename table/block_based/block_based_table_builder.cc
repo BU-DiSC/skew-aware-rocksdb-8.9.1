@@ -2043,6 +2043,10 @@ void BlockBasedTableBuilder::ResetFilterBitsPerKey(double bits_per_key) {
     // No filter block needed
     return;
   }
+  if (bits_per_key < 1.0) {
+    rep_->filter_builder.reset();
+    return;
+  }
   rep_->filter_builder->ResetFilterBitsPerKey(bits_per_key);
 }
 

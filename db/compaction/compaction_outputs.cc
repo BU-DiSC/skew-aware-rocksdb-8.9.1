@@ -11,6 +11,7 @@
 #include "db/compaction/compaction_outputs.h"
 
 #include "db/builder.h"
+#include "logging/logging.h"
 #include "monitoring/file_read_sample.h"
 #include "table/block_based/block_based_table_factory.h"
 #include "table/block_based/filter_policy_internal.h"
@@ -41,13 +42,23 @@ Status CompactionOutputs::Finish(
     file_existing_point_read_inc(
         meta, (uint64_t)round(current_output().agg_num_existing_point_reads));
     double new_bits_per_key = 0.0;
-    bpk_alloc_helper_.PrepareBpkAllocation(compaction_->immutable_options(),
-                                           compaction_->input_vstorage());
-    bool reset_flag = bpk_alloc_helper_.IfNeedAllocateBitsPerKey(
+    if (bpk_alloc_helper_ == nullptr) {
+      bpk_alloc_helper_ = new BitsPerKeyAllocHelper(
+          compaction_->immutable_options(), compaction_->input_vstorage());
+    }
+    bpk_alloc_helper_->PrepareBpkAllocation(compaction_);
+    meta->num_entries = builder_->NumEntries();
+    bool reset_flag = bpk_alloc_helper_->IfNeedAllocateBitsPerKey(
         *meta, compaction_->max_num_entries_in_output_level(),
         &new_bits_per_key);
     if (reset_flag) {
       builder_->ResetFilterBitsPerKey(new_bits_per_key);
+      meta->bpk = new_bits_per_key;
+      ROCKS_LOG_INFO(compaction_->immutable_options()->info_log,
+                     "[%s] Compaction generates new file %" PRIu64
+                     " with reset bits-per-key %.4f",
+                     compaction_->column_family_data()->GetName().c_str(),
+                     meta->fd.GetNumber(), new_bits_per_key);
     }
 
     s = builder_->Finish();
@@ -423,9 +434,12 @@ Status CompactionOutputs::AddToOutput(
   assert(builder_ != nullptr);
   const Slice& value = c_iter.value();
   s = current_output().validator.Add(key, value);
-  current_output().agg_num_point_reads += c_iter.GetAvgNumPointReads();
-  current_output().agg_num_existing_point_reads +=
-      c_iter.GetAvgNumExistingPointReads();
+  if (c_iter.GetAvgNumPointReads() > 0) {
+    current_output().agg_num_point_reads += c_iter.GetAvgNumPointReads();
+    current_output().agg_num_existing_point_reads +=
+        c_iter.GetAvgNumExistingPointReads();
+  }
+
   if (!s.ok()) {
     return s;
   }
@@ -812,7 +826,8 @@ CompactionOutputs::CompactionOutputs(const Compaction* compaction,
 
   level_ptrs_ = std::vector<size_t>(compaction_->number_levels(), 0);
 
-  bpk_alloc_helper_ = BitsPerKeyAllocHelper();
+  bpk_alloc_helper_ = new BitsPerKeyAllocHelper(
+      compaction_->immutable_options(), compaction_->input_vstorage());
 }
 
 }  // namespace ROCKSDB_NAMESPACE

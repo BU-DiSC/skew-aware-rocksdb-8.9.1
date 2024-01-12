@@ -228,6 +228,11 @@ class CompactionOutputs {
       builder_->Abandon();
       builder_.reset();
     }
+
+    if (bpk_alloc_helper_ != nullptr) {
+      delete bpk_alloc_helper_;
+      bpk_alloc_helper_ = nullptr;
+    }
   }
 
   // Updates states related to file cutting for TTL.
@@ -369,7 +374,7 @@ class CompactionOutputs {
   // increasing key range.
   std::vector<size_t> level_ptrs_;
 
-  BitsPerKeyAllocHelper bpk_alloc_helper_;
+  BitsPerKeyAllocHelper* bpk_alloc_helper_ = nullptr;
 };
 
 // helper struct to concatenate the last level and penultimate level outputs

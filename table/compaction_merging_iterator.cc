@@ -23,17 +23,6 @@ class CompactionMergingIterator : public InternalIterator {
     for (int i = 0; i < n; i++) {
       children_[i].level = i;
       children_[i].iter.Set(children[i]);
-      if (i != n - 1) {
-        children_[i].iter.SetAvgNumPointReads(
-            children[i]->GetAvgNumExistingPointReads());
-        children_[i].iter.SetAvgNumExistingPointReads(
-            children[i]->GetAvgNumExistingPointReads());
-      } else {
-        children_[i].iter.SetAvgNumPointReads(
-            children[i]->GetAvgNumPointReads());
-        children_[i].iter.SetAvgNumExistingPointReads(
-            children[i]->GetAvgNumExistingPointReads());
-      }
       assert(children_[i].type == HeapItem::ITERATOR);
     }
     assert(range_tombstones.size() == static_cast<size_t>(n));
@@ -293,6 +282,8 @@ void CompactionMergingIterator::Next() {
   // as the current points to the current record. move the iterator forward.
   if (current_->type == HeapItem::ITERATOR) {
     current_->iter.Next();
+    SetAvgNumPointReads(current_->iter.GetAvgNumPointReads());
+    SetAvgNumExistingPointReads(current_->iter.GetAvgNumExistingPointReads());
     if (current_->iter.Valid()) {
       // current is still valid after the Next() call above.  Call
       // replace_top() to restore the heap property.  When the same child
@@ -336,6 +327,8 @@ void CompactionMergingIterator::FindNextVisibleKey() {
     // current->iter is a LevelIterator, and it enters a new SST file in the
     // Next() call here.
     current->iter.Next();
+    SetAvgNumPointReads(current_->iter.GetAvgNumPointReads());
+    SetAvgNumExistingPointReads(current_->iter.GetAvgNumExistingPointReads());
     if (current->iter.Valid()) {
       assert(current->iter.status().ok());
       minHeap_.replace_top(current);

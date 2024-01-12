@@ -36,6 +36,22 @@ class IteratorWrapperBase {
     }
   }
 
+  double GetAvgNumPointReads() const {
+    if (iter_) {
+      return iter_->GetAvgNumPointReads();
+    } else {
+      return 0.0;
+    }
+  }
+
+  double GetAvgNumExistingPointReads() const {
+    if (iter_) {
+      return iter_->GetAvgNumExistingPointReads();
+    } else {
+      return 0.0;
+    }
+  }
+
   void SetAvgNumPointReads(double avg_num_point_reads) {
     iter_->SetAvgNumPointReads(avg_num_point_reads);
   }

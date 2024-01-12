@@ -218,7 +218,8 @@ Status BuildTable(
     double agg_num_point_reads = 0;
     double agg_num_existing_point_reads = 0;
 
-    BitsPerKeyAllocHelper bpk_alloc_helper;
+    BitsPerKeyAllocHelper bpk_alloc_helper(&tboptions.ioptions,
+                                           version->storage_info());
 
     for (; c_iter.Valid(); c_iter.Next()) {
       const Slice& key = c_iter.key();
@@ -315,13 +316,15 @@ Status BuildTable(
       meta->stats.num_point_reads.store((uint64_t)round(agg_num_point_reads));
       meta->stats.num_existing_point_reads.store(
           (uint64_t)round(agg_num_existing_point_reads));
+      meta->num_entries = *num_input_entries;
+      meta->num_range_deletions = num_unfragmented_tombstones;
       if (version) {
-        bpk_alloc_helper.PrepareBpkAllocation(&tboptions.ioptions,
-                                              version->storage_info());
+        bpk_alloc_helper.PrepareBpkAllocation();
         double new_bits_per_key = 0.0;
         if (bpk_alloc_helper.IfNeedAllocateBitsPerKey(*meta, *num_input_entries,
                                                       &new_bits_per_key)) {
           builder->ResetFilterBitsPerKey(new_bits_per_key);
+          meta->bpk = new_bits_per_key;
         }
       }
 

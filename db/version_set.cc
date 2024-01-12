@@ -951,7 +951,8 @@ class LevelIterator final : public InternalIterator {
           nullptr,
       bool allow_unprepared_value = false,
       TruncatedRangeDelIterator**** range_tombstone_iter_ptr_ = nullptr)
-      : table_cache_(table_cache),
+      : adjusted_avg_num_point_reads_(0),
+        table_cache_(table_cache),
         read_options_(read_options),
         file_options_(file_options),
         icomparator_(icomparator),
@@ -1065,6 +1066,14 @@ class LevelIterator final : public InternalIterator {
     read_seq_ = read_seq;
   }
 
+  void SetAdjustedAvgNumPointQueries(double adjusted_avg_num_point_reads) {
+    adjusted_avg_num_point_reads_ = adjusted_avg_num_point_reads;
+  }
+
+  void SetIsDeepestLevelInCompaction(bool is_deepest_level_in_compaction) {
+    is_deepest_level_in_compaction_ = is_deepest_level_in_compaction;
+  }
+
  private:
   // Return true if at least one invalid file is seen and skipped.
   bool SkipEmptyFileForward();
@@ -1138,6 +1147,8 @@ class LevelIterator final : public InternalIterator {
     }
   }
 
+  double adjusted_avg_num_point_reads_;
+  bool is_deepest_level_in_compaction_;
   TableCache* table_cache_;
   const ReadOptions& read_options_;
   const FileOptions& file_options_;
@@ -1506,6 +1517,17 @@ void LevelIterator::SetFileIterator(InternalIterator* iter) {
   }
 
   InternalIterator* old_iter = file_iter_.Set(iter);
+  if (iter != nullptr) {
+    if (is_deepest_level_in_compaction_) {
+      this->SetAvgNumPointReads(iter->GetAvgNumPointReads() +
+                                adjusted_avg_num_point_reads_);
+    } else {
+      this->SetAvgNumPointReads(iter->GetAvgNumExistingPointReads() +
+                                adjusted_avg_num_point_reads_);
+    }
+
+    this->SetAvgNumExistingPointReads(iter->GetAvgNumExistingPointReads());
+  }
 
   // Update the read pattern for PrefetchBuffer.
   if (is_next_read_sequential_) {
@@ -2148,6 +2170,8 @@ VersionStorageInfo::VersionStorageInfo(
       compaction_level_(num_levels_),
       l0_delay_trigger_count_(0),
       compact_cursor_(num_levels_),
+      accumulated_num_point_reads_(0),
+      accumulated_num_existing_point_reads_(0),
       accumulated_file_size_(0),
       accumulated_raw_key_size_(0),
       accumulated_raw_value_size_(0),
@@ -2164,6 +2188,12 @@ VersionStorageInfo::VersionStorageInfo(
       epoch_number_requirement_(epoch_number_requirement),
       offpeak_time_option_(std::move(offpeak_time_option)) {
   if (ref_vstorage != nullptr) {
+    accumulated_num_point_reads_.store(
+        ref_vstorage->accumulated_num_point_reads_.load(
+            std::memory_order_relaxed));
+    accumulated_num_existing_point_reads_.store(
+        ref_vstorage->accumulated_num_existing_point_reads_.load(
+            std::memory_order_relaxed));
     accumulated_file_size_ = ref_vstorage->accumulated_file_size_;
     accumulated_raw_key_size_ = ref_vstorage->accumulated_raw_key_size_;
     accumulated_raw_value_size_ = ref_vstorage->accumulated_raw_value_size_;
@@ -2406,7 +2436,7 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
                 &storage_info_.file_indexer_, user_comparator(),
                 internal_comparator());
   FdWithKeyRange* f = fp.GetNextFile();
-
+  storage_info_.accumulated_num_point_reads_.fetch_add(1);
   while (f != nullptr) {
     if (*max_covering_tombstone_seq > 0) {
       // The remaining files we look at will only contain covered keys, so we
@@ -2457,6 +2487,7 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
         break;
       case GetContext::kFound:
         file_existing_point_read_inc(f->file_metadata, 1);
+        storage_info_.accumulated_num_existing_point_reads_.fetch_add(1);
         if (fp.GetHitFileLevel() == 0) {
           RecordTick(db_statistics_, GET_HIT_L0);
         } else if (fp.GetHitFileLevel() == 1) {
@@ -6960,6 +6991,17 @@ InternalIterator* VersionSet::MakeInputIterator(
                                               c->num_input_levels() - 1
                                         : c->num_input_levels());
   InternalIterator** list = new InternalIterator*[space];
+
+  uint64_t max_num_non_existing_point_reads = 0;
+  uint64_t num_non_existing_point_reads_in_last_level = 0;
+  uint64_t num_entries_with_max_num_non_existing_point_reads = 0;
+  uint64_t temp_num_existing_point_reads_in_a_level = 0;
+  uint64_t temp_num_non_existing_point_reads = 0;
+  uint64_t temp_num_point_reads = 0;
+  uint64_t temp_num_existing_point_reads = 0;
+  size_t iterator_index_with_max_num_non_existing_point_reads = 0;
+  LevelIterator* level_iter_with_max_non_existing_point_reads = nullptr;
+
   // First item in the pair is a pointer to range tombstones.
   // Second item is a pointer to a member of a LevelIterator,
   // that will be initialized to where CompactionMergingIterator stores
@@ -6989,7 +7031,7 @@ InternalIterator* VersionSet::MakeInputIterator(
             continue;
           }
           TruncatedRangeDelIterator* range_tombstone_iter = nullptr;
-          list[num++] = cfd->table_cache()->NewIterator(
+          list[num] = cfd->table_cache()->NewIterator(
               read_options, file_options_compactions,
               cfd->internal_comparator(), fmd, range_del_agg,
               c->mutable_cf_options()->prefix_extractor,
@@ -7005,12 +7047,79 @@ InternalIterator* VersionSet::MakeInputIterator(
               c->mutable_cf_options()->block_protection_bytes_per_key,
               /*range_del_read_seqno=*/nullptr,
               /*range_del_iter=*/&range_tombstone_iter);
+          temp_num_point_reads =
+              fmd.stats.num_point_reads.load(std::memory_order_relaxed);
+          temp_num_existing_point_reads =
+              fmd.stats.num_existing_point_reads.load(
+                  std::memory_order_relaxed);
+          if (max_num_non_existing_point_reads >
+              temp_num_existing_point_reads) {
+            max_num_non_existing_point_reads -= temp_num_existing_point_reads;
+          } else {
+            max_num_non_existing_point_reads = 0;
+          }
+          if (max_num_non_existing_point_reads + temp_num_existing_point_reads >
+              temp_num_point_reads) {
+            max_num_non_existing_point_reads =
+                temp_num_point_reads - temp_num_existing_point_reads;
+            num_entries_with_max_num_non_existing_point_reads =
+                fmd.num_entries - fmd.num_deletions + 1;
+            iterator_index_with_max_num_non_existing_point_reads = num;
+            level_iter_with_max_non_existing_point_reads = nullptr;
+          }
+
+          if (c->num_input_levels() > 0) {
+            list[num]->SetAvgNumPointReads(
+                list[num]->GetAvgNumExistingPointReads());
+          }
+          num++;
           range_tombstones.emplace_back(range_tombstone_iter, nullptr);
         }
       } else {
+        const LevelFilesBrief* flevel = c->input_levels(which);
+        uint64_t temp_agg_num_non_existing_point_reads = 0;
+        // During compaction, if a shallower level has significantly larger
+        // number of non-existing queries, these queries must come from the
+        // first file or the last file in the shallower level, we choose the
+        // file with larger number of entries
+        uint64_t max_num_entries_in_edge = 0;
+        uint64_t left_num_non_existing_point_reads = 0;
+        uint64_t left_num_entries = 0;
+        uint64_t right_num_non_existing_point_reads = 0;
+        uint64_t right_num_entries = 0;
+        temp_num_existing_point_reads_in_a_level = 0;
+        for (size_t i = 0; i < flevel->num_files; i++) {
+          const FileMetaData& fmd = *flevel->files[i].file_metadata;
+          temp_num_non_existing_point_reads =
+              fmd.stats.num_point_reads.load(std::memory_order_relaxed) -
+              fmd.stats.num_existing_point_reads.load(
+                  std::memory_order_relaxed);
+          temp_num_existing_point_reads_in_a_level +=
+              fmd.stats.num_existing_point_reads.load(
+                  std::memory_order_relaxed);
+          temp_agg_num_non_existing_point_reads +=
+              temp_num_non_existing_point_reads;
+          if (i == 0) {
+            left_num_non_existing_point_reads =
+                temp_num_non_existing_point_reads;
+            left_num_entries = fmd.num_entries - fmd.num_deletions;
+          }
+          if (i + 1 == flevel->num_files) {
+            right_num_non_existing_point_reads =
+                temp_num_non_existing_point_reads;
+            right_num_entries = fmd.num_entries - fmd.num_deletions;
+          }
+        }
+        if (left_num_non_existing_point_reads <
+            right_num_non_existing_point_reads) {
+          max_num_entries_in_edge = right_num_entries;
+        } else {
+          max_num_entries_in_edge = left_num_entries;
+        }
+
         // Create concatenating iterator for the files from this level
         TruncatedRangeDelIterator*** tombstone_iter_ptr = nullptr;
-        list[num++] = new LevelIterator(
+        LevelIterator* tmp_level_iterator = new LevelIterator(
             cfd->table_cache(), read_options, file_options_compactions,
             cfd->internal_comparator(), c->input_levels(which),
             c->mutable_cf_options()->prefix_extractor,
@@ -7020,10 +7129,68 @@ InternalIterator* VersionSet::MakeInputIterator(
             /*level=*/static_cast<int>(c->level(which)),
             c->mutable_cf_options()->block_protection_bytes_per_key,
             range_del_agg, c->boundaries(which), false, &tombstone_iter_ptr);
+        list[num] = tmp_level_iterator;
+        // non_existing point reads in shallower levels could be existing point
+        // reads in lower level
+        if (max_num_non_existing_point_reads >
+            temp_num_existing_point_reads_in_a_level) {
+          max_num_non_existing_point_reads -=
+              temp_num_existing_point_reads_in_a_level;
+        } else {
+          max_num_non_existing_point_reads = 0;
+        }
+        if (temp_agg_num_non_existing_point_reads >
+            max_num_non_existing_point_reads) {
+          max_num_non_existing_point_reads =
+              temp_agg_num_non_existing_point_reads;
+          // when distributing the number of non-existing queries, we divide it
+          // by the number of intervals (max_num_entries_in_edge + 1), instead
+          // of the number of entries
+          num_entries_with_max_num_non_existing_point_reads =
+              max_num_entries_in_edge + 1;
+          level_iter_with_max_non_existing_point_reads = tmp_level_iterator;
+          iterator_index_with_max_num_non_existing_point_reads = num;
+        }
+
+        if (which + 1 < c->num_input_levels()) {
+          tmp_level_iterator->SetIsDeepestLevelInCompaction(false);
+        } else {
+          tmp_level_iterator->SetIsDeepestLevelInCompaction(true);
+          num_non_existing_point_reads_in_last_level =
+              temp_agg_num_non_existing_point_reads;
+        }
+        num++;
+
         range_tombstones.emplace_back(nullptr, tombstone_iter_ptr);
       }
     }
   }
+
+  // adjust avg number of point queries if there is any level that has
+  // zero-result queries more than the deepest level
+  if (iterator_index_with_max_num_non_existing_point_reads + 1 < num &&
+      max_num_non_existing_point_reads >
+          num_non_existing_point_reads_in_last_level &&
+      num_entries_with_max_num_non_existing_point_reads > 0) {
+    if (level_iter_with_max_non_existing_point_reads) {
+      level_iter_with_max_non_existing_point_reads
+          ->SetAdjustedAvgNumPointQueries(
+              ((max_num_non_existing_point_reads -
+                num_non_existing_point_reads_in_last_level) *
+               1.0) /
+              num_entries_with_max_num_non_existing_point_reads);
+    } else {
+      list[iterator_index_with_max_num_non_existing_point_reads]
+          ->SetAvgNumPointReads(
+              list[iterator_index_with_max_num_non_existing_point_reads]
+                  ->GetAvgNumExistingPointReads() +
+              ((max_num_non_existing_point_reads -
+                num_non_existing_point_reads_in_last_level) *
+               1.0) /
+                  num_entries_with_max_num_non_existing_point_reads);
+    }
+  }
+
   assert(num <= space);
   InternalIterator* result = NewCompactionMergingIterator(
       &c->column_family_data()->internal_comparator(), list,

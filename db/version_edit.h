@@ -188,6 +188,7 @@ struct FileMetaData {
   Cache::Handle* table_reader_handle = nullptr;
 
   FileSampledStats stats;
+  double bpk = -1.0;
 
   // Stats for compensating deletion entries during compaction
 
@@ -486,7 +487,9 @@ class VersionEdit {
                const std::string& file_checksum_func_name,
                const UniqueId64x2& unique_id,
                const uint64_t compensated_range_deletion_size,
-               uint64_t tail_size, bool user_defined_timestamps_persisted) {
+               uint64_t tail_size, bool user_defined_timestamps_persisted,
+               uint64_t num_point_reads = 0,
+               uint64_t num_existing_point_reads = 0) {
     assert(smallest_seqno <= largest_seqno);
     new_files_.emplace_back(
         level,
@@ -497,6 +500,11 @@ class VersionEdit {
                      file_checksum_func_name, unique_id,
                      compensated_range_deletion_size, tail_size,
                      user_defined_timestamps_persisted));
+    if (num_point_reads != 0 || num_existing_point_reads != 0) {
+      new_files_.back().second.stats.num_point_reads.store(num_point_reads);
+      new_files_.back().second.stats.num_existing_point_reads.store(
+          num_existing_point_reads);
+    }
     files_to_quarantine_.push_back(file);
     if (!HasLastSequence() || largest_seqno > GetLastSequence()) {
       SetLastSequence(largest_seqno);
@@ -698,6 +706,14 @@ class VersionEdit {
     return &files_to_quarantine_;
   }
 
+  void AddNumExistingPointReads(uint64_t num_existing_point_reads) {
+    added_num_existing_point_reads_ += num_existing_point_reads;
+  }
+
+  uint64_t GetNumExistingPointReads() const {
+    return added_num_existing_point_reads_;
+  }
+
   std::string DebugString(bool hex_key = false) const;
   std::string DebugJSON(int edit_num, bool hex_key = false) const;
 
@@ -731,6 +747,8 @@ class VersionEdit {
   bool has_min_log_number_to_keep_ = false;
   bool has_last_sequence_ = false;
   bool has_persist_user_defined_timestamps_ = false;
+
+  uint64_t added_num_existing_point_reads_ = 0;
 
   // Compaction cursors for round-robin compaction policy
   CompactCursors compact_cursors_;
