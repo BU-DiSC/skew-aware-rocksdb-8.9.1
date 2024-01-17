@@ -158,7 +158,7 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
     while (!level_states_pq_.empty() &&
            std::log(level_states_pq_.top().num_entries) +
                    common_constant_in_bpk_optimization_ >
-               -std::exp(-log_2_squared)) {
+               -log_2_squared) {
       tmp_num_entries_in_filter_by_file = level_states_pq_.top().num_entries;
       temp_sum_in_bpk_optimization_ -=
           std::log(tmp_num_entries_in_filter_by_file) *
@@ -170,8 +170,10 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
           monkey_num_entries_;
       level_states_pq_.pop();
     }
-    if (!level_states_pq_.empty())
+
+    if (!level_states_pq_.empty()) {
       monkey_bpk_num_entries_threshold_ = level_states_pq_.top().num_entries;
+    }
   } else if (bpk_alloc_type_ ==
              BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc) {
     if (compaction == nullptr &&
@@ -298,7 +300,7 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
         !file_workload_state_pq_.empty() &&
         std::log(file_workload_state_pq_.top().weight * total_empty_queries_) *
                 +common_constant_in_bpk_optimization_ >
-            -std::exp(-log_2_squared)) {
+            -log_2_squared) {
       weight = file_workload_state_pq_.top().weight;
       temp_sum_in_bpk_optimization_ -=
           std::log(weight * total_empty_queries_) *
@@ -318,9 +320,11 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
           workload_aware_num_entries_with_empty_queries_;
       file_workload_state_pq_.pop();
     }
-    if (!file_workload_state_pq_.empty())
+
+    if (!file_workload_state_pq_.empty()) {
       workload_aware_bpk_weight_threshold_ =
           file_workload_state_pq_.top().weight;
+    }
   }
 
   bpk_optimization_prepared_flag_ = true;
@@ -333,7 +337,9 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
     return false;
   assert(bits_per_key);
 
-  if (bpk_alloc_type_ == BitsPerKeyAllocationType::kMonkeyBpkAlloc) {
+  if (bpk_alloc_type_ == BitsPerKeyAllocationType::kMonkeyBpkAlloc ||
+      (bpk_alloc_type_ == BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc &&
+       vstorage_->GetAccumulatedNumPointReads() == 0)) {
     if (!bpk_optimization_prepared_flag_) {
       flush_flag_ = true;
       temp_sum_in_bpk_optimization_ +=
@@ -346,7 +352,7 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
     if (num_entries_in_output_level > monkey_bpk_num_entries_threshold_ ||
         std::log(num_entries_in_output_level) +
                 common_constant_in_bpk_optimization_ >
-            -std::exp(-log_2_squared)) {
+            -log_2_squared) {
       *bits_per_key = 0;
     } else {
       *bits_per_key = -(std::log(num_entries_in_output_level) +
@@ -355,22 +361,18 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
     }
   } else if (bpk_alloc_type_ ==
              BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc) {
-    if (total_empty_queries_ == 0) return false;
     uint64_t num_entries = meta.num_entries - meta.num_range_deletions;
     uint64_t num_point_reads =
         meta.stats.num_point_reads.load(std::memory_order_relaxed);
     if (num_point_reads == 0) return false;
     uint64_t num_existing_point_reads =
         meta.stats.num_existing_point_reads.load(std::memory_order_relaxed);
-    if (num_existing_point_reads >= num_point_reads &&
-        num_existing_point_reads > 0) {
-      *bits_per_key = 0;
-      return true;
-    }
 
     if (!bpk_optimization_prepared_flag_) {
       flush_flag_ = true;
-      total_empty_queries_ = num_point_reads - num_existing_point_reads;
+      if (num_point_reads > num_existing_point_reads) {
+        total_empty_queries_ = num_point_reads - num_existing_point_reads;
+      }
       temp_sum_in_bpk_optimization_ +=
           num_entries * std::log(num_entries * 1.0 / total_empty_queries_);
       workload_aware_num_entries_ += num_entries;
@@ -378,12 +380,20 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
       PrepareBpkAllocation();
     }
 
+    if (total_empty_queries_ == 0) return false;
+
+    if (num_existing_point_reads >= num_point_reads &&
+        num_existing_point_reads > 0) {
+      *bits_per_key = 0;
+      return true;
+    }
+
     double weight =
         num_entries * 1.0 / (num_point_reads - num_existing_point_reads);
-    if (weight >= workload_aware_bpk_weight_threshold_ ||
+    if (weight > workload_aware_bpk_weight_threshold_ ||
         std::log(weight * total_empty_queries_) +
                 common_constant_in_bpk_optimization_ >
-            -std::exp(-log_2_squared)) {
+            -log_2_squared) {
       *bits_per_key = 0;
     } else {
       *bits_per_key = -(std::log(weight * total_empty_queries_) +

@@ -60,6 +60,9 @@ Status CompactionOutputs::Finish(
                      compaction_->column_family_data()->GetName().c_str(),
                      meta->fd.GetNumber(), new_bits_per_key);
     }
+    compaction_->input_vstorage()->SetBpkCommonConstant(
+        bpk_alloc_helper_->bpk_alloc_type_,
+        bpk_alloc_helper_->common_constant_in_bpk_optimization_);
 
     s = builder_->Finish();
 

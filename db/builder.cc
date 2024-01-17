@@ -28,6 +28,7 @@
 #include "file/filename.h"
 #include "file/read_write_util.h"
 #include "file/writable_file_writer.h"
+#include "logging/logging.h"
 #include "monitoring/iostats_context_imp.h"
 #include "monitoring/thread_status_util.h"
 #include "options/options_helper.h"
@@ -325,7 +326,15 @@ Status BuildTable(
                                                       &new_bits_per_key)) {
           builder->ResetFilterBitsPerKey(new_bits_per_key);
           meta->bpk = new_bits_per_key;
+          ROCKS_LOG_INFO(ioptions.info_log,
+                         "[%s] Flushes generates new file %" PRIu64
+                         " with reset bits-per-key %.4f",
+                         tboptions.column_family_name.c_str(),
+                         meta->fd.GetNumber(), new_bits_per_key);
         }
+        version->storage_info()->SetBpkCommonConstant(
+            bpk_alloc_helper.bpk_alloc_type_,
+            bpk_alloc_helper.common_constant_in_bpk_optimization_);
       }
 
       s = builder->Finish();

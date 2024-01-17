@@ -193,11 +193,15 @@ class VersionStorageInfo {
   // Update the accumulated stats from a file-meta.
   void UpdateAccumulatedStats(FileMetaData* file_meta);
 
-  void UpdateNumPointReadsAndExistingPointReads(
-      uint64_t added_num_existing_point_reads) const {
+  void UpdateNumPointReadsStats(uint64_t added_num_point_reads,
+                                uint64_t added_num_existing_point_reads) const {
     accumulated_num_point_reads_.fetch_add(added_num_existing_point_reads);
     accumulated_num_existing_point_reads_.fetch_add(
         added_num_existing_point_reads);
+    if (added_num_point_reads > added_num_existing_point_reads) {
+      accumulated_num_empty_point_reads_by_file_.fetch_add(
+          added_num_point_reads - added_num_existing_point_reads);
+    }
   }
 
   // Decrease the current stat from a to-be-deleted file-meta
@@ -622,6 +626,24 @@ class VersionStorageInfo {
     return accumulated_num_point_reads_;
   }
 
+  uint64_t GetAccumulatedNumEmptyPointReadsByFile() const {
+    return accumulated_num_empty_point_reads_by_file_;
+  }
+
+  BitsPerKeyAllocationType GetBitsPerKeyAllocationType() const {
+    return bits_per_key_alloc_type_;
+  }
+
+  double GetBitsPerKeyCommonConstant() const {
+    return common_constant_in_bpk_optimization_;
+  }
+
+  void SetBpkCommonConstant(BitsPerKeyAllocationType bits_per_key_alloc_type,
+                            double common_constant) const {
+    bits_per_key_alloc_type_ = bits_per_key_alloc_type;
+    common_constant_in_bpk_optimization_ = common_constant;
+  }
+
  private:
   void ComputeCompensatedSizes();
   void UpdateNumNonEmptyLevels();
@@ -747,6 +769,11 @@ class VersionStorageInfo {
 
   mutable std::atomic<uint64_t> accumulated_num_point_reads_;
   mutable std::atomic<uint64_t> accumulated_num_existing_point_reads_;
+  mutable std::atomic<uint64_t> accumulated_num_empty_point_reads_by_file_;
+
+  mutable BitsPerKeyAllocationType bits_per_key_alloc_type_ =
+      BitsPerKeyAllocationType::kDefaultBpkAlloc;
+  mutable double common_constant_in_bpk_optimization_ = 0;
 
   // the following are the sampled temporary stats.
   // the current accumulated size of sampled files.
@@ -1057,7 +1084,8 @@ class Version {
   // checked during read operations. In certain cases (trivial move or preload),
   // the filter block may already be cached, but we still do not access it such
   // that it eventually expires from the cache.
-  bool IsFilterSkipped(int level, bool is_file_last_in_level = false);
+  bool IsFilterSkipped(int level, bool is_file_last_in_level = false,
+                       const FileMetaData* meta = nullptr);
 
   // The helper function of UpdateAccumulatedStats, which may fill the missing
   // fields of file_meta from its associated TableProperties.

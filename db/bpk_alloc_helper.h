@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <queue>
 
 #include "compaction/compaction.h"
@@ -33,8 +34,10 @@ class BitsPerKeyAllocHelper {
       BitsPerKeyAllocationType::kDefaultBpkAlloc;
   bool flush_flag_ = false;
   bool bpk_optimization_prepared_flag_ = false;
-  double workload_aware_bpk_weight_threshold_ = 0.0;
-  uint64_t monkey_bpk_num_entries_threshold_ = 0;
+  double workload_aware_bpk_weight_threshold_ =
+      std::numeric_limits<double>::max();
+  uint64_t monkey_bpk_num_entries_threshold_ =
+      std::numeric_limits<uint64_t>::max();
   uint64_t monkey_num_entries_ = 0;
   uint64_t workload_aware_num_entries_ = 0;
   uint64_t workload_aware_num_entries_with_empty_queries_ = 0;
