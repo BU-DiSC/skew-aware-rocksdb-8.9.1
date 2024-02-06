@@ -1051,7 +1051,8 @@ Status FlushJob::WriteLevel0Table() {
         meta_.compensated_range_deletion_size, meta_.tail_size,
         meta_.user_defined_timestamps_persisted,
         meta_.stats.num_point_reads.load(std::memory_order_relaxed),
-        meta_.stats.num_existing_point_reads.load(std::memory_order_relaxed));
+        meta_.stats.num_existing_point_reads.load(std::memory_order_relaxed),
+        meta_.stats.start_global_point_read_number);
     edit_->AddNumExistingPointReads(
         meta_.stats.num_existing_point_reads.load(std::memory_order_relaxed));
     edit_->SetBlobFileAdditions(std::move(blob_file_additions));

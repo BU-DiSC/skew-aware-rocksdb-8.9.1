@@ -159,6 +159,18 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
            std::log(level_states_pq_.top().num_entries) +
                    common_constant_in_bpk_optimization_ >
                -log_2_squared) {
+      if (level_states_pq_.top().level == 0) {
+        for (FileMetaData* meta : vstorage_->LevelFiles(0)) {
+          if (meta->fd.GetNumber() == level_states_pq_.top().file_number) {
+            meta->bpk = 0.0;
+          }
+        }
+      } else {
+        for (FileMetaData* meta :
+             vstorage_->LevelFiles(level_states_pq_.top().level)) {
+          meta->bpk = 0.0;
+        }
+      }
       tmp_num_entries_in_filter_by_file = level_states_pq_.top().num_entries;
       temp_sum_in_bpk_optimization_ -=
           std::log(tmp_num_entries_in_filter_by_file) *
@@ -207,14 +219,16 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
           tmp_num_point_reads = level2num_point_reads[level];
         }
         for (const FileMetaData* meta : input_files->at(i).files) {
+          std::pair<uint64_t, uint64_t> est_num_point_reads =
+              meta->stats.GetEstimatedNumPointReads(
+                  vstorage_->GetAccumulatedNumPointReads(),
+                  ioptions_->point_read_learning_rate);
+          fileID_in_compaction.insert(meta->fd.GetNumber());
+          if (est_num_point_reads.first == 0) continue;
           num_entries_in_compaction +=
               meta->num_entries - meta->num_range_deletions;
-          tmp_num_point_reads +=
-              meta->stats.num_point_reads.load(std::memory_order_relaxed);
-          num_existing_point_reads_in_compaction +=
-              meta->stats.num_existing_point_reads.load(
-                  std::memory_order_relaxed);
-          fileID_in_compaction.insert(meta->fd.GetNumber());
+          tmp_num_point_reads += est_num_point_reads.first;
+          num_existing_point_reads_in_compaction += est_num_point_reads.second;
         }
         level2num_point_reads.emplace(level, tmp_num_point_reads);
       }
@@ -235,11 +249,13 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
             fileID_in_compaction.find(file_meta->fd.GetNumber()) !=
                 fileID_in_compaction.end())
           continue;
-        num_point_reads =
-            file_meta->stats.num_point_reads.load(std::memory_order_relaxed);
-        num_existing_point_reads =
-            file_meta->stats.num_existing_point_reads.load(
-                std::memory_order_relaxed);
+        std::pair<uint64_t, uint64_t> est_num_point_reads =
+            file_meta->stats.GetEstimatedNumPointReads(
+                vstorage_->GetAccumulatedNumPointReads(),
+                ioptions_->point_read_learning_rate);
+        num_point_reads = est_num_point_reads.first;
+        num_existing_point_reads = est_num_point_reads.second;
+        if (num_point_reads == 0) continue;
         if (num_existing_point_reads < num_point_reads) {
           num_empty_point_reads = num_point_reads - num_existing_point_reads;
           total_empty_queries_ += num_empty_point_reads;
@@ -249,8 +265,9 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
               tmp_num_entries_in_filter_by_file;
           workload_aware_num_entries_with_empty_queries_ +=
               tmp_num_entries_in_filter_by_file;
-          file_workload_state_pq_.push(FileWorkloadState(
-              tmp_num_entries_in_filter_by_file, num_empty_point_reads));
+          file_workload_state_pq_.push(
+              FileWorkloadState(tmp_num_entries_in_filter_by_file,
+                                num_empty_point_reads, file_meta));
         }
         workload_aware_num_entries_ += tmp_num_entries_in_filter_by_file;
       }
@@ -272,13 +289,14 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
       uint64_t avg_num_empty_queries_in_compaction =
           num_empty_queries_in_compaction * 1.0 / num_files_in_compaction;
       if (avg_num_entries_in_compaction < 1.0) {
-        file_workload_state_pq_.push(FileWorkloadState(
-            num_entries_in_compaction, num_empty_queries_in_compaction));
+        file_workload_state_pq_.push(
+            FileWorkloadState(num_entries_in_compaction,
+                              num_empty_queries_in_compaction, nullptr));
       } else {
         for (size_t i = 0; i < num_files_in_compaction; i++) {
           file_workload_state_pq_.push(
               FileWorkloadState(avg_num_entries_in_compaction,
-                                avg_num_empty_queries_in_compaction));
+                                avg_num_empty_queries_in_compaction, nullptr));
         }
       }
     }
@@ -301,6 +319,9 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
         std::log(file_workload_state_pq_.top().weight * total_empty_queries_) *
                 +common_constant_in_bpk_optimization_ >
             -log_2_squared) {
+      if (file_workload_state_pq_.top().meta != nullptr) {
+        file_workload_state_pq_.top().meta->bpk = 0.0;
+      }
       weight = file_workload_state_pq_.top().weight;
       temp_sum_in_bpk_optimization_ -=
           std::log(weight * total_empty_queries_) *
@@ -349,10 +370,10 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
           LevelState(0, num_entries_in_output_level, meta.fd.GetNumber()));
       PrepareBpkAllocation();
     }
-    if (num_entries_in_output_level > monkey_bpk_num_entries_threshold_ ||
+    if (/*num_entries_in_output_level > monkey_bpk_num_entries_threshold_ ||*/
         std::log(num_entries_in_output_level) +
-                common_constant_in_bpk_optimization_ >
-            -log_2_squared) {
+            common_constant_in_bpk_optimization_ >
+        -log_2_squared) {
       *bits_per_key = 0;
     } else {
       *bits_per_key = -(std::log(num_entries_in_output_level) +
@@ -362,11 +383,14 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
   } else if (bpk_alloc_type_ ==
              BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc) {
     uint64_t num_entries = meta.num_entries - meta.num_range_deletions;
-    uint64_t num_point_reads =
-        meta.stats.num_point_reads.load(std::memory_order_relaxed);
+    std::pair<uint64_t, uint64_t> est_num_point_reads =
+        meta.stats.GetEstimatedNumPointReads(
+            vstorage_->GetAccumulatedNumPointReads(),
+            ioptions_->point_read_learning_rate);
+
+    uint64_t num_point_reads = est_num_point_reads.first;
     if (num_point_reads == 0) return false;
-    uint64_t num_existing_point_reads =
-        meta.stats.num_existing_point_reads.load(std::memory_order_relaxed);
+    uint64_t num_existing_point_reads = est_num_point_reads.second;
 
     if (!bpk_optimization_prepared_flag_) {
       flush_flag_ = true;
@@ -380,7 +404,8 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
       PrepareBpkAllocation();
     }
 
-    if (total_empty_queries_ == 0) return false;
+    if (total_empty_queries_ == 0 || file_workload_state_pq_.empty())
+      return false;
 
     if (num_existing_point_reads >= num_point_reads &&
         num_existing_point_reads > 0) {
@@ -390,10 +415,10 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
 
     double weight =
         num_entries * 1.0 / (num_point_reads - num_existing_point_reads);
-    if (weight > workload_aware_bpk_weight_threshold_ ||
+    if (/*weight > workload_aware_bpk_weight_threshold_ ||*/
         std::log(weight * total_empty_queries_) +
-                common_constant_in_bpk_optimization_ >
-            -log_2_squared) {
+            common_constant_in_bpk_optimization_ >
+        -log_2_squared) {
       *bits_per_key = 0;
     } else {
       *bits_per_key = -(std::log(weight * total_empty_queries_) +

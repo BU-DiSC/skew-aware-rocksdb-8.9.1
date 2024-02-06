@@ -1307,10 +1307,12 @@ bool MemTable::Get(const LookupKey& key, std::string* value,
     *s = Status::MergeInProgress();
   }
   PERF_COUNTER_ADD(get_from_memtable_count, 1);
+
   num_point_reads_.fetch_add(1);
   if (found_final_value) {
     num_existing_point_reads_.fetch_add(1);
   }
+
   return found_final_value;
 }
 

@@ -63,6 +63,12 @@ struct DbPath;
 
 using FileTypeSet = SmallEnumSet<FileType, FileType::kBlobFile>;
 
+enum PointReadsTrackMethod : char {
+  kNoTrack = 0x1,
+  kNaiiveTrack = 0x2,
+  kDynamicCompactionAwareTrack = 0x3,
+};
+
 struct ColumnFamilyOptions : public AdvancedColumnFamilyOptions {
   // The function recovers options to a previous version. Only 4.6 or later
   // versions are supported.
@@ -1451,6 +1457,11 @@ struct DBOptions {
   // use "0:00-23:59". To make an entire day have no offpeak period, leave
   // this field blank. Default: Empty string (no offpeak).
   std::string daily_offpeak_time_utc = "";
+
+  PointReadsTrackMethod point_reads_track_method =
+      PointReadsTrackMethod::kNoTrack;
+  uint8_t track_point_read_number_window_size = 64;
+  double point_read_learning_rate = 0.8;
 };
 
 // Options to control the behavior of a database (passed to DB::Open)

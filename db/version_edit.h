@@ -95,7 +95,8 @@ enum NewFileCustomTag : uint32_t {
   kCompensatedRangeDeletionSize = 14,
   kTailSize = 15,
   kUserDefinedTimestampsPersisted = 16,
-
+  kFileNumPointReads = 17,
+  kFileNumExistingPointReads = 18,
   // If this bit for the custom tag is set, opening DB should fail if
   // we don't know this field.
   kCustomTagNonSafeIgnoreMask = 1 << 6,
@@ -165,12 +166,19 @@ struct FileDescriptor {
 
 struct FileSampledStats {
   FileSampledStats()
-      : num_reads_sampled(0), num_point_reads(0), num_existing_point_reads(0) {}
+      : num_reads_sampled(0),
+        num_point_reads(0),
+        num_existing_point_reads(0),
+        start_global_point_read_number(0),
+        point_read_result_in_window(0) {}
   FileSampledStats(const FileSampledStats& other) { *this = other; }
   FileSampledStats& operator=(const FileSampledStats& other) {
     num_reads_sampled = other.num_reads_sampled.load();
     num_point_reads = other.num_point_reads.load();
     num_existing_point_reads = other.num_existing_point_reads.load();
+    point_read_result_in_window = other.point_read_result_in_window;
+    global_point_read_number_window = other.global_point_read_number_window;
+    start_global_point_read_number = other.start_global_point_read_number;
     return *this;
   }
 
@@ -178,6 +186,117 @@ struct FileSampledStats {
   mutable std::atomic<uint64_t> num_reads_sampled;
   mutable std::atomic<uint64_t> num_point_reads;
   mutable std::atomic<uint64_t> num_existing_point_reads;
+  mutable uint64_t start_global_point_read_number;
+
+  mutable std::queue<uint64_t> global_point_read_number_window;
+  mutable uint64_t point_read_result_in_window;
+
+  uint64_t GetNumPointReads() const {
+    return num_point_reads.load(std::memory_order_relaxed) +
+           global_point_read_number_window.size();
+  }
+
+  uint64_t GetNumExistingPointReads() const {
+    uint64_t temp_num_existing_point_reads =
+        num_existing_point_reads.load(std::memory_order_relaxed);
+    if (global_point_read_number_window.size() == 64) {
+      temp_num_existing_point_reads +=
+          __builtin_popcount(point_read_result_in_window);
+    } else {
+      temp_num_existing_point_reads += __builtin_popcount(
+          point_read_result_in_window &
+          ((0x1 << global_point_read_number_window.size()) - 1));
+    }
+    return temp_num_existing_point_reads;
+  }
+
+  uint64_t GetNumNonExistingPointReads() const {
+    uint64_t temp_num_point_reads = GetNumPointReads();
+    uint64_t temp_num_existing_point_reads = GetNumExistingPointReads();
+    if (temp_num_existing_point_reads >= temp_num_point_reads) {
+      return 0;
+    } else {
+      return temp_num_point_reads - temp_num_existing_point_reads;
+    }
+  }
+
+  // return <the estimated number of point queries, the estimated number of
+  // existing point queries>
+  std::pair<uint64_t, uint64_t> GetEstimatedNumPointReads(
+      uint64_t current_global_point_read_number, double learning_rate) const {
+    uint64_t est_num_point_reads = 0;
+    uint64_t origin_num_point_reads =
+        num_point_reads.load(std::memory_order_relaxed);
+    uint64_t origin_num_existing_reads =
+        num_existing_point_reads.load(std::memory_order_relaxed);
+    est_num_point_reads =
+        origin_num_point_reads + global_point_read_number_window.size();
+    if (global_point_read_number_window.size() > 0) {
+      if (current_global_point_read_number >
+              global_point_read_number_window.front() &&
+          global_point_read_number_window.front() >
+              start_global_point_read_number) {
+        est_num_point_reads =
+            (round)(current_global_point_read_number * 1.0 /
+                    ((current_global_point_read_number -
+                      global_point_read_number_window.front()) *
+                         learning_rate /
+                         global_point_read_number_window.size() +
+                     (1.0 - learning_rate) *
+                         (global_point_read_number_window.front() -
+                          start_global_point_read_number) /
+                         origin_num_point_reads));
+      } else if (current_global_point_read_number >
+                 global_point_read_number_window.front()) {
+        est_num_point_reads =
+            (round)(current_global_point_read_number * 1.0 *
+                    global_point_read_number_window.size() /
+                    (current_global_point_read_number -
+                     global_point_read_number_window.front()));
+      } else if (global_point_read_number_window.front() >
+                 start_global_point_read_number) {
+        est_num_point_reads = (round)(current_global_point_read_number * 1.0 *
+                                      origin_num_point_reads /
+                                      (global_point_read_number_window.front() -
+                                       start_global_point_read_number));
+      }
+    } else if (current_global_point_read_number >
+                   start_global_point_read_number &&
+               start_global_point_read_number != 0) {
+      est_num_point_reads = (round)(current_global_point_read_number * 1.0 /
+                                    (current_global_point_read_number -
+                                     start_global_point_read_number) *
+                                    origin_num_point_reads);
+    }
+
+    double est_existing_ratio = 0.0;
+    uint64_t num_existing_point_reads_in_window = 0;
+    if (global_point_read_number_window.size() == 64) {
+      num_existing_point_reads_in_window =
+          __builtin_popcount(point_read_result_in_window);
+    } else {
+      num_existing_point_reads_in_window = __builtin_popcount(
+          point_read_result_in_window &
+          ((0x1 << global_point_read_number_window.size()) - 1));
+    }
+    if (!global_point_read_number_window.empty() &&
+        origin_num_point_reads != 0) {
+      est_existing_ratio = learning_rate * num_existing_point_reads_in_window /
+                               global_point_read_number_window.size() +
+                           (1.0 - learning_rate) * origin_num_existing_reads /
+                               origin_num_point_reads;
+    } else if (origin_num_point_reads != 0) {
+      est_existing_ratio =
+          origin_num_existing_reads * 1.0 / origin_num_point_reads;
+    } else if (!global_point_read_number_window.empty()) {
+      est_existing_ratio = num_existing_point_reads_in_window * 1.0 /
+                           global_point_read_number_window.size();
+    }
+    return std::make_pair(
+        est_num_point_reads,
+        std::min((uint64_t)round(est_existing_ratio * est_num_point_reads),
+                 est_num_point_reads));
+  }
 };
 
 struct FileMetaData {
@@ -189,7 +308,7 @@ struct FileMetaData {
   Cache::Handle* table_reader_handle = nullptr;
 
   FileSampledStats stats;
-  double bpk = -1.0;
+  mutable double bpk = -1.0;
 
   // Stats for compensating deletion entries during compaction
 
@@ -277,7 +396,9 @@ struct FileMetaData {
                const std::string& _file_checksum_func_name,
                UniqueId64x2 _unique_id,
                const uint64_t _compensated_range_deletion_size,
-               uint64_t _tail_size, bool _user_defined_timestamps_persisted)
+               uint64_t _tail_size, bool _user_defined_timestamps_persisted,
+               uint64_t num_point_reads = 0,
+               uint64_t num_existing_point_reads = 0)
       : fd(file, file_path_id, file_size, smallest_seq, largest_seq),
         smallest(smallest_key),
         largest(largest_key),
@@ -293,6 +414,9 @@ struct FileMetaData {
         unique_id(std::move(_unique_id)),
         tail_size(_tail_size),
         user_defined_timestamps_persisted(_user_defined_timestamps_persisted) {
+    stats.num_point_reads.store(num_point_reads, std::memory_order_relaxed);
+    stats.num_existing_point_reads.store(num_existing_point_reads,
+                                         std::memory_order_relaxed);
     TEST_SYNC_POINT_CALLBACK("FileMetaData::FileMetaData", this);
   }
 
@@ -490,7 +614,8 @@ class VersionEdit {
                const uint64_t compensated_range_deletion_size,
                uint64_t tail_size, bool user_defined_timestamps_persisted,
                uint64_t num_point_reads = 0,
-               uint64_t num_existing_point_reads = 0) {
+               uint64_t num_existing_point_reads = 0,
+               uint64_t start_global_point_read_number = 0) {
     assert(smallest_seqno <= largest_seqno);
     new_files_.emplace_back(
         level,
@@ -506,6 +631,8 @@ class VersionEdit {
       new_files_.back().second.stats.num_existing_point_reads.store(
           num_existing_point_reads);
     }
+    new_files_.back().second.stats.start_global_point_read_number =
+        start_global_point_read_number;
     files_to_quarantine_.push_back(file);
     if (!HasLastSequence() || largest_seqno > GetLastSequence()) {
       SetLastSequence(largest_seqno);

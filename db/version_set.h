@@ -202,6 +202,42 @@ class VersionStorageInfo {
       accumulated_num_empty_point_reads_by_file_.fetch_add(
           added_num_point_reads - added_num_existing_point_reads);
     }
+    point_reads_num_when_last_flush_ =
+        accumulated_num_point_reads_.load(std::memory_order_relaxed);
+    num_flushes_++;
+  }
+
+  void UpdateAvgNumPointReadsPerLvl0File(double learning_rate) const {
+    if (num_levels_ > 0 && files_[0].size() > 0) {
+      double agg_avg_num_point_reads = 0.0;
+      uint8_t num_valid_lvl0_files = 0;
+      for (FileMetaData* meta : files_[0]) {
+        if (meta->stats.global_point_read_number_window.size() +
+                    meta->stats.num_point_reads.load(
+                        std::memory_order_relaxed) >
+                0 &&
+            accumulated_num_point_reads_.load(std::memory_order_relaxed) >
+                meta->stats.start_global_point_read_number) {
+          agg_avg_num_point_reads +=
+              (meta->stats.global_point_read_number_window.size() +
+               meta->stats.num_point_reads.load(std::memory_order_relaxed)) *
+              1.0 /
+              (accumulated_num_point_reads_.load(std::memory_order_relaxed) -
+               meta->stats.start_global_point_read_number);
+          num_valid_lvl0_files++;
+        }
+      }
+      if (num_valid_lvl0_files > 0) {
+        if (avg_num_point_reads_per_lvl0_file_ > 0.0) {
+          avg_num_point_reads_per_lvl0_file_ =
+              (1.0 - learning_rate) * avg_num_point_reads_per_lvl0_file_ +
+              learning_rate * agg_avg_num_point_reads / num_valid_lvl0_files;
+        } else {
+          avg_num_point_reads_per_lvl0_file_ =
+              agg_avg_num_point_reads / num_valid_lvl0_files;
+        }
+      }
+    }
   }
 
   // Decrease the current stat from a to-be-deleted file-meta
@@ -623,11 +659,16 @@ class VersionStorageInfo {
                                      int last_level, int last_l0_idx);
 
   uint64_t GetAccumulatedNumPointReads() const {
-    return accumulated_num_point_reads_;
+    return accumulated_num_point_reads_.load(std::memory_order_relaxed);
+  }
+
+  double GetAvgNumPointReadsPerLvl0File() const {
+    return avg_num_point_reads_per_lvl0_file_;
   }
 
   uint64_t GetAccumulatedNumEmptyPointReadsByFile() const {
-    return accumulated_num_empty_point_reads_by_file_;
+    return accumulated_num_empty_point_reads_by_file_.load(
+        std::memory_order_relaxed);
   }
 
   BitsPerKeyAllocationType GetBitsPerKeyAllocationType() const {
@@ -643,6 +684,12 @@ class VersionStorageInfo {
     bits_per_key_alloc_type_ = bits_per_key_alloc_type;
     common_constant_in_bpk_optimization_ = common_constant;
   }
+
+  uint64_t GetNumPointReadWhenLastFlush() const {
+    return point_reads_num_when_last_flush_;
+  }
+
+  uint64_t GetNumFlushes() const { return num_flushes_; }
 
  private:
   void ComputeCompensatedSizes();
@@ -768,8 +815,11 @@ class VersionStorageInfo {
   std::vector<InternalKey> compact_cursor_;
 
   mutable std::atomic<uint64_t> accumulated_num_point_reads_;
+  mutable double avg_num_point_reads_per_lvl0_file_;
   mutable std::atomic<uint64_t> accumulated_num_existing_point_reads_;
   mutable std::atomic<uint64_t> accumulated_num_empty_point_reads_by_file_;
+  mutable uint64_t point_reads_num_when_last_flush_ = 0;
+  mutable std::atomic<uint64_t> num_flushes_ = 0;
 
   mutable BitsPerKeyAllocationType bits_per_key_alloc_type_ =
       BitsPerKeyAllocationType::kDefaultBpkAlloc;

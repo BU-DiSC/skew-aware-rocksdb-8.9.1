@@ -314,12 +314,45 @@ Status BuildTable(
           ioptions.compaction_style == CompactionStyle::kCompactionStyleFIFO
               ? meta->file_creation_time
               : meta->oldest_ancester_time);
-      meta->stats.num_point_reads.store((uint64_t)round(agg_num_point_reads));
-      meta->stats.num_existing_point_reads.store(
-          (uint64_t)round(agg_num_existing_point_reads));
       meta->num_entries = *num_input_entries;
       meta->num_range_deletions = num_unfragmented_tombstones;
+
       if (version) {
+        uint64_t temp_num_point_reads = round(agg_num_point_reads);
+        if (ioptions.point_reads_track_method == kDynamicCompactionAwareTrack) {
+          if (version->storage_info()->GetAccumulatedNumPointReads() >
+              floor(agg_num_point_reads)) {
+            meta->stats.start_global_point_read_number =
+                version->storage_info()->GetAccumulatedNumPointReads() -
+                floor(agg_num_point_reads);
+          }
+          // updating the average number of point reads for each level0 file
+          // with corresponding number of tracked point reads in memtable (the
+          // number of point reads in memtable is not the same as the number of
+          // point reads that is going to have as an SST file)
+          version->storage_info()->UpdateAvgNumPointReadsPerLvl0File(
+              ioptions.point_read_learning_rate);
+          if (version->storage_info()->GetAvgNumPointReadsPerLvl0File() > 0) {
+            // adjust the number of point reads according to the accumulated
+            // number of point queries (only used for bits-per-key reallocation)
+            // because we num_point_reads in Lvl0 files is mostly used as a
+            // tracked number of point reads instead of the estimated number
+            temp_num_point_reads = std::max(
+                round(
+                    meta->stats.start_global_point_read_number *
+                    version->storage_info()->GetAvgNumPointReadsPerLvl0File()),
+                // temp_num_point_reads =
+                // std::max(round(meta->stats.start_global_point_read_number*1.0),
+                round(agg_num_point_reads));
+          }
+        }
+        meta->stats.num_point_reads.store(temp_num_point_reads);
+        if (agg_num_point_reads > 0) {
+          meta->stats.num_existing_point_reads.store(std::max(
+              round(temp_num_point_reads * agg_num_existing_point_reads /
+                    agg_num_point_reads),
+              agg_num_existing_point_reads));
+        }
         bpk_alloc_helper.PrepareBpkAllocation();
         double new_bits_per_key = 0.0;
         if (bpk_alloc_helper.IfNeedAllocateBitsPerKey(*meta, *num_input_entries,
@@ -335,6 +368,18 @@ Status BuildTable(
         version->storage_info()->SetBpkCommonConstant(
             bpk_alloc_helper.bpk_alloc_type_,
             bpk_alloc_helper.common_constant_in_bpk_optimization_);
+        if (ioptions.point_reads_track_method == kDynamicCompactionAwareTrack) {
+          // adjusted to the estimated number of point reads that may be tracked
+          // when it is as an SST file
+          // meta->stats.num_point_reads.store(round(std::max(agg_num_point_reads*1.0,agg_num_existing_point_reads)));
+          meta->stats.num_point_reads.store(round(std::max(
+              agg_num_point_reads *
+                  version->storage_info()->GetAvgNumPointReadsPerLvl0File(),
+              agg_num_existing_point_reads)));
+        }
+
+        meta->stats.num_existing_point_reads.store(
+            round(agg_num_existing_point_reads));
       }
 
       s = builder->Finish();

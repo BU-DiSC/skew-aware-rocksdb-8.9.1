@@ -438,6 +438,14 @@ class Compaction {
                                       const int start_level,
                                       const int output_level);
 
+  uint64_t GetAvgNumPointReadsWithNaiiveTrack() const {
+    return avg_num_point_reads_with_naiive_track_;
+  }
+
+  uint64_t GetAvgNumExistingPointReadsWithNaiiveTrack() const {
+    return avg_num_existing_point_reads_with_naiive_track_;
+  }
+
  private:
   void SetInputVersion(Version* input_version);
 
@@ -576,6 +584,9 @@ class Compaction {
   InternalKey penultimate_level_largest_;
   PenultimateOutputRangeType penultimate_output_range_type_ =
       PenultimateOutputRangeType::kNotSupported;
+
+  uint64_t avg_num_point_reads_with_naiive_track_;
+  uint64_t avg_num_existing_point_reads_with_naiive_track_;
 };
 
 #ifndef NDEBUG

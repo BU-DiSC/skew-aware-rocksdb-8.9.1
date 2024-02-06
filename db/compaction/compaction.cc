@@ -341,7 +341,9 @@ Compaction::Compaction(
                   _compaction_reason == CompactionReason::kRefitLevel
               ? Compaction::kInvalidLevel
               : EvaluatePenultimateLevel(vstorage, immutable_options_,
-                                         start_level_, output_level_)) {
+                                         start_level_, output_level_)),
+      avg_num_point_reads_with_naiive_track_(0),
+      avg_num_existing_point_reads_with_naiive_track_(0) {
   MarkFilesBeingCompacted(true);
   if (is_manual_compaction_) {
     compaction_reason_ = CompactionReason::kManualCompaction;
@@ -366,6 +368,9 @@ Compaction::Compaction(
 
   // setup input_levels_
   {
+    uint64_t num_files = 0;
+    uint64_t agg_num_point_reads = 0;
+    uint64_t agg_num_existing_reads = 0;
     input_levels_.resize(num_input_levels());
     // calculate max_num_entries_in_output_levels used in monkey allocation
     max_num_entries_in_output_level_ = 0;
@@ -383,6 +388,23 @@ Compaction::Compaction(
          input_vstorage_->LevelFiles(output_level_)) {
       max_num_entries_in_output_level_ +=
           meta->num_entries - meta->num_range_deletions;
+    }
+
+    if (immutable_options_.point_reads_track_method == kNaiiveTrack) {
+      for (size_t which = 0; which < num_input_levels(); which++) {
+        num_files += inputs_[which].files.size();
+        for (FileMetaData* meta : inputs_[which].files) {
+          agg_num_point_reads +=
+              meta->stats.num_point_reads.load(std::memory_order_relaxed);
+          agg_num_existing_reads += meta->stats.num_existing_point_reads.load(
+              std::memory_order_relaxed);
+        }
+      }
+
+      avg_num_point_reads_with_naiive_track_ =
+          (round)(agg_num_point_reads * 1.0 / num_files);
+      avg_num_existing_point_reads_with_naiive_track_ =
+          (round)(agg_num_existing_reads * 1.0 / num_files);
     }
   }
 

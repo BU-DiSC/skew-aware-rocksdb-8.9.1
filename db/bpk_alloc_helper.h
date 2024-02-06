@@ -82,9 +82,12 @@ class BitsPerKeyAllocHelper {
     double num_entries;
     double num_empty_point_reads;
     double weight;
-    FileWorkloadState(double _num_entries, double _num_empty_point_reads) {
-      num_entries = _num_entries;
-      num_empty_point_reads = _num_empty_point_reads;
+    const FileMetaData* meta;
+    FileWorkloadState(double _num_entries, double _num_empty_point_reads,
+                      const FileMetaData* _meta)
+        : num_entries(_num_entries),
+          num_empty_point_reads(_num_empty_point_reads),
+          meta(_meta) {
       if (num_empty_point_reads != 0) {
         weight = num_entries * 1.0 / num_empty_point_reads;
       }

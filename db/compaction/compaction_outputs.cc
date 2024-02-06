@@ -37,10 +37,20 @@ Status CompactionOutputs::Finish(
         meta->fd.largest_seqno, meta->file_creation_time);
     builder_->SetSeqnoTimeTableProperties(seqno_to_time_mapping_str,
                                           meta->oldest_ancester_time);
-    file_point_read_inc(meta,
-                        (uint64_t)round(current_output().agg_num_point_reads));
-    file_existing_point_read_inc(
-        meta, (uint64_t)round(current_output().agg_num_existing_point_reads));
+    if (compaction_->immutable_options()->point_reads_track_method ==
+        kDynamicCompactionAwareTrack) {
+      file_point_read_inc(
+          meta, (uint64_t)round(current_output().agg_num_point_reads));
+      file_existing_point_read_inc(
+          meta, (uint64_t)round(current_output().agg_num_existing_point_reads));
+    } else if (compaction_->immutable_options()->point_reads_track_method ==
+               kNaiiveTrack) {
+      file_point_read_inc(meta,
+                          compaction_->GetAvgNumPointReadsWithNaiiveTrack());
+      file_existing_point_read_inc(
+          meta, compaction_->GetAvgNumExistingPointReadsWithNaiiveTrack());
+    }
+
     double new_bits_per_key = 0.0;
     if (bpk_alloc_helper_ == nullptr) {
       bpk_alloc_helper_ = new BitsPerKeyAllocHelper(
@@ -54,11 +64,16 @@ Status CompactionOutputs::Finish(
     if (reset_flag) {
       builder_->ResetFilterBitsPerKey(new_bits_per_key);
       meta->bpk = new_bits_per_key;
-      ROCKS_LOG_INFO(compaction_->immutable_options()->info_log,
-                     "[%s] Compaction generates new file %" PRIu64
-                     " with reset bits-per-key %.4f",
-                     compaction_->column_family_data()->GetName().c_str(),
-                     meta->fd.GetNumber(), new_bits_per_key);
+      ROCKS_LOG_INFO(
+          compaction_->immutable_options()->info_log,
+          "[%s] Compaction generates new file %" PRIu64
+          " (num_point_reads=%" PRIu64 ", num_existing_point_reads=%" PRIu64
+          ") with reset bits-per-key %.4f",
+          compaction_->column_family_data()->GetName().c_str(),
+          meta->fd.GetNumber(),
+          meta->stats.num_point_reads.load(std::memory_order_relaxed),
+          meta->stats.num_existing_point_reads.load(std::memory_order_relaxed),
+          new_bits_per_key);
     }
     compaction_->input_vstorage()->SetBpkCommonConstant(
         bpk_alloc_helper_->bpk_alloc_type_,

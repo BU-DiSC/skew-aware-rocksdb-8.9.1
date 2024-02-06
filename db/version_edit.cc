@@ -256,6 +256,29 @@ bool VersionEdit::EncodeTo(std::string* dst,
       PutLengthPrefixedSlice(dst, Slice(&p, 1));
     }
 
+    // uint64_t num_point_reads =
+    // f.stats.num_point_reads.load(std::memory_order_relaxed) +
+    // f.stats.global_point_read_number_window.size(); uint64_t
+    // num_existing_point_reads =
+    // f.stats.num_existing_point_reads.load(std::memory_order_relaxed) +
+    // __builtin_popcount(f.stats.point_read_result_in_window);
+    uint64_t num_point_reads =
+        f.stats.num_point_reads.load(std::memory_order_relaxed);
+    uint64_t num_existing_point_reads =
+        f.stats.num_existing_point_reads.load(std::memory_order_relaxed);
+    if (num_point_reads) {
+      PutVarint32(dst, NewFileCustomTag::kFileNumPointReads);
+      std::string num_point_reads_string;
+      PutVarint64(&num_point_reads_string, num_point_reads);
+      PutLengthPrefixedSlice(dst, Slice(num_point_reads_string));
+    }
+    if (num_existing_point_reads) {
+      PutVarint32(dst, NewFileCustomTag::kFileNumExistingPointReads);
+      std::string num_existing_point_reads_string;
+      PutVarint64(&num_existing_point_reads_string, num_existing_point_reads);
+      PutLengthPrefixedSlice(dst, Slice(num_existing_point_reads_string));
+    }
+
     TEST_SYNC_POINT_CALLBACK("VersionEdit::EncodeTo:NewFile4:CustomizeFields",
                              dst);
 
@@ -353,6 +376,9 @@ const char* VersionEdit::DecodeNewFile4From(Slice* input) {
   uint64_t file_size = 0;
   SequenceNumber smallest_seqno = 0;
   SequenceNumber largest_seqno = kMaxSequenceNumber;
+
+  uint64_t num_point_reads;
+  uint64_t num_existing_point_reads;
   if (GetLevel(input, &level, &msg) && GetVarint64(input, &number) &&
       GetVarint64(input, &file_size) && GetInternalKey(input, &f.smallest) &&
       GetInternalKey(input, &f.largest) &&
@@ -452,6 +478,18 @@ const char* VersionEdit::DecodeNewFile4From(Slice* input) {
             return "user-defined timestamps persisted field wrong size";
           }
           f.user_defined_timestamps_persisted = (field[0] == 1);
+          break;
+        case kFileNumPointReads:
+          if (!GetVarint64(&field, &num_point_reads)) {
+            return "Invalid number of point reads";
+          }
+          f.stats.num_point_reads.store(num_point_reads);
+          break;
+        case kFileNumExistingPointReads:
+          if (!GetVarint64(&field, &num_existing_point_reads)) {
+            return "Invalid number of existing point reads";
+          }
+          f.stats.num_existing_point_reads.store(num_existing_point_reads);
           break;
         default:
           if ((custom_tag & kCustomTagNonSafeIgnoreMask) != 0) {
