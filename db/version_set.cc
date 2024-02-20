@@ -97,8 +97,6 @@ namespace ROCKSDB_NAMESPACE {
 
 namespace {
 
-const double filter_skip_lower_bound_in_bpk_opt = -std::pow(0.5, std::log(2));
-
 // Find File in LevelFilesBrief data structure
 // Within an index range defined by left and right
 int FindFileInRange(const InternalKeyComparator& icmp,
@@ -2250,6 +2248,7 @@ VersionStorageInfo::VersionStorageInfo(
     bits_per_key_alloc_type_ = ref_vstorage->bits_per_key_alloc_type_;
     common_constant_in_bpk_optimization_ =
         ref_vstorage->common_constant_in_bpk_optimization_;
+    levelIDs_with_bpk0_in_monkey_ = ref_vstorage->levelIDs_with_bpk0_in_monkey_;
     accumulated_file_size_ = ref_vstorage->accumulated_file_size_;
     accumulated_raw_key_size_ = ref_vstorage->accumulated_raw_key_size_;
     accumulated_raw_value_size_ = ref_vstorage->accumulated_raw_value_size_;
@@ -2561,7 +2560,9 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
     }
     switch (get_context.State()) {
       case GetContext::kNotFound:
-        storage_info_.accumulated_num_empty_point_reads_by_file_.fetch_add(1);
+        if (f->file_metadata->bpk != 0.0) {
+          storage_info_.accumulated_num_empty_point_reads_by_file_.fetch_add(1);
+        }
         if (vset_->db_options()->point_reads_track_method ==
                 PointReadsTrackMethod::kDynamicCompactionAwareTrack &&
             is_evicted_point_read_existing) {
@@ -3191,17 +3192,9 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
     return true;  // bpk == 0 means we choose not to build filter, thus we
                   // should skip it
 
-  double lower_bound = std::exp(filter_skip_lower_bound_in_bpk_opt -
-                                storage_info_.GetBitsPerKeyCommonConstant());
   if (storage_info_.GetBitsPerKeyAllocationType() ==
       BitsPerKeyAllocationType::kMonkeyBpkAlloc) {
-    uint64_t agg_num_entries_in_level = 0;
-    for (const FileMetaData* tmp_meta : storage_info_.LevelFiles(level)) {
-      agg_num_entries_in_level +=
-          tmp_meta->num_entries - tmp_meta->num_range_deletions;
-      if (agg_num_entries_in_level > lower_bound) return true;
-    }
-    return false;
+    return storage_info_.IsFilterSkippedWithEmptyBpkInMonkey(level);
   } else if (storage_info_.GetBitsPerKeyAllocationType() ==
              BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc) {
     std::pair<uint64_t, uint64_t> num_point_read_stats =
@@ -3233,12 +3226,12 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
         cfd_->ioptions()->track_point_read_number_window_size) {
       return false;
     }
-    result = (meta->num_entries - meta->num_range_deletions) * 1.0 /
-                 (num_point_reads - num_existing_point_reads) >
-             lower_bound /
-                 (storage_info_.accumulated_num_empty_point_reads_by_file_.load(
-                      std::memory_order_relaxed) *
-                  1.0);
+    result =
+        (std::log((meta->num_entries - meta->num_range_deletions) * 1.0 /
+                  (num_point_reads - num_existing_point_reads) *
+                  storage_info_.accumulated_num_empty_point_reads_by_file_.load(
+                      std::memory_order_relaxed)) +
+         storage_info_.GetBitsPerKeyCommonConstant()) > 0;
     return result;
   }
   return false;

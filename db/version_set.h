@@ -207,6 +207,12 @@ class VersionStorageInfo {
     num_flushes_++;
   }
 
+  void UpdateNumEmptyPointReads(
+      uint64_t estimated_num_empty_point_reads) const {
+    accumulated_num_empty_point_reads_by_file_.store(
+        estimated_num_empty_point_reads, std::memory_order_relaxed);
+  }
+
   void UpdateAvgNumPointReadsPerLvl0File(double learning_rate) const {
     if (num_levels_ > 0 && files_[0].size() > 0) {
       double agg_avg_num_point_reads = 0.0;
@@ -679,6 +685,16 @@ class VersionStorageInfo {
     return common_constant_in_bpk_optimization_;
   }
 
+  void SetLevelIDsWithEmptyBpkInMonkey(
+      const std::unordered_set<size_t>& _levelIDs_with_bpk0_in_monkey) const {
+    levelIDs_with_bpk0_in_monkey_ = _levelIDs_with_bpk0_in_monkey;
+  }
+
+  bool IsFilterSkippedWithEmptyBpkInMonkey(size_t level) const {
+    return levelIDs_with_bpk0_in_monkey_.find(level) !=
+           levelIDs_with_bpk0_in_monkey_.end();
+  }
+
   void SetBpkCommonConstant(BitsPerKeyAllocationType bits_per_key_alloc_type,
                             double common_constant) const {
     bits_per_key_alloc_type_ = bits_per_key_alloc_type;
@@ -824,6 +840,7 @@ class VersionStorageInfo {
   mutable BitsPerKeyAllocationType bits_per_key_alloc_type_ =
       BitsPerKeyAllocationType::kDefaultBpkAlloc;
   mutable double common_constant_in_bpk_optimization_ = 0;
+  mutable std::unordered_set<size_t> levelIDs_with_bpk0_in_monkey_;
 
   // the following are the sampled temporary stats.
   // the current accumulated size of sampled files.
