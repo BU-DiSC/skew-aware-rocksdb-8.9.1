@@ -45,6 +45,13 @@ static std::unordered_map<std::string, CacheTier> cache_tier_string_map = {
     {"kVolatileTier", CacheTier::kVolatileTier},
     {"kNonVolatileBlockTier", CacheTier::kNonVolatileBlockTier}};
 
+static std::unordered_map<std::string, PointReadsTrackMethod>
+    point_reads_track_method_string_map = {
+        {"kNoTrack", PointReadsTrackMethod::kNoTrack},
+        {"kDynamicCompactionAwareTrack",
+         PointReadsTrackMethod::kDynamicCompactionAwareTrack},
+        {"kNaiiveTrack", PointReadsTrackMethod::kNaiiveTrack}};
+
 static std::unordered_map<std::string, InfoLogLevel> info_log_level_string_map =
     {{"DEBUG_LEVEL", InfoLogLevel::DEBUG_LEVEL},
      {"INFO_LEVEL", InfoLogLevel::INFO_LEVEL},
@@ -361,6 +368,19 @@ static std::unordered_map<std::string, OptionTypeInfo>
              offsetof(struct ImmutableDBOptions,
                       access_hint_on_compaction_start),
              &access_hint_string_map)},
+        {"point_reads_track_method",
+         OptionTypeInfo::Enum<PointReadsTrackMethod>(
+             offsetof(struct ImmutableDBOptions, point_reads_track_method),
+             &point_reads_track_method_string_map)},
+        {"track_point_read_number_window_size",
+         {offsetof(struct ImmutableDBOptions,
+                   track_point_read_number_window_size),
+          OptionType::kUInt8T, OptionVerificationType::kNormal,
+          OptionTypeFlags::kNone}},
+        {"point_read_learning_rate",
+         {offsetof(struct ImmutableDBOptions, point_read_learning_rate),
+          OptionType::kDouble, OptionVerificationType::kNormal,
+          OptionTypeFlags::kNone}},
         {"info_log_level",
          OptionTypeInfo::Enum<InfoLogLevel>(
              offsetof(struct ImmutableDBOptions, info_log_level),
