@@ -19,6 +19,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -2249,6 +2250,8 @@ VersionStorageInfo::VersionStorageInfo(
     common_constant_in_bpk_optimization_ =
         ref_vstorage->common_constant_in_bpk_optimization_;
     levelIDs_with_bpk0_in_monkey_ = ref_vstorage->levelIDs_with_bpk0_in_monkey_;
+    leader_thread_id_ = ref_vstorage->leader_thread_id_;
+    thread_ids_ = ref_vstorage->thread_ids_;
     accumulated_file_size_ = ref_vstorage->accumulated_file_size_;
     accumulated_raw_key_size_ = ref_vstorage->accumulated_raw_key_size_;
     accumulated_raw_value_size_ = ref_vstorage->accumulated_raw_value_size_;
@@ -2451,6 +2454,39 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
   Slice ikey = k.internal_key();
   Slice user_key = k.user_key();
 
+  bool update_query_stats_flag = false;
+  if (vset_->db_options()->point_reads_track_method ==
+      PointReadsTrackMethod::kDynamicCompactionAwareTrack) {
+    std::thread::id this_id = std::this_thread::get_id();
+    if (storage_info_.thread_ids_.find(this_id) ==
+        storage_info_.thread_ids_.end()) {
+      storage_info_.thread_ids_mutex_.lock();
+      storage_info_.thread_ids_.insert(this_id);
+      std::mt19937 gen(std::random_device{}());
+      std::sample(storage_info_.thread_ids_.begin(),
+                  storage_info_.thread_ids_.end(),
+                  &storage_info_.leader_thread_id_, 1, gen);
+      // storage_info_.leader_thread_id_ = *(storage_info_.thread_ids_.begin() +
+      // (size_t)(Random::GetTLSInstance()->Next() %
+      // storage_info_.thread_ids_.size()));
+      storage_info_.thread_ids_mutex_.unlock();
+    }
+    if (this_id == storage_info_.leader_thread_id_) {
+      if (Random::GetTLSInstance()->Next() % 2048 == 307) {
+        storage_info_.thread_ids_mutex_.lock();
+        std::mt19937 gen(std::random_device{}());
+        std::sample(storage_info_.thread_ids_.begin(),
+                    storage_info_.thread_ids_.end(),
+                    &storage_info_.leader_thread_id_, 1, gen);
+        // storage_info_.leader_thread_id_ = *(storage_info_.thread_ids_.begin()
+        // + (size_t)(Random::GetTLSInstance()->Next() %
+        // storage_info_.thread_ids_.size()));
+        storage_info_.thread_ids_mutex_.unlock();
+      }
+      update_query_stats_flag = this_id == storage_info_.leader_thread_id_;
+    }
+  }
+
   assert(status->ok() || status->IsMergeInProgress());
 
   if (key_exists != nullptr) {
@@ -2491,7 +2527,8 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
                 &storage_info_.file_indexer_, user_comparator(),
                 internal_comparator());
   FdWithKeyRange* f = fp.GetNextFile();
-  storage_info_.accumulated_num_point_reads_.fetch_add(1);
+  if (update_query_stats_flag)
+    storage_info_.accumulated_num_point_reads_.fetch_add(1);
   while (f != nullptr) {
     if (*max_covering_tombstone_seq > 0) {
       // The remaining files we look at will only contain covered keys, so we
@@ -2505,8 +2542,7 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
     bool is_evicted_point_read_existing = false;
     uint8_t maximum_window_size =
         vset_->db_options()->track_point_read_number_window_size;
-    if (vset_->db_options()->point_reads_track_method ==
-        PointReadsTrackMethod::kDynamicCompactionAwareTrack) {
+    if (update_query_stats_flag) {
       if (f->file_metadata->stats.global_point_read_number_window.size() ==
           maximum_window_size) {
         f->file_metadata->stats.global_point_read_number_window.pop();
@@ -2524,7 +2560,8 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
       f->file_metadata->stats.global_point_read_number_window.push(
           storage_info_.GetAccumulatedNumPointReads());
       f->file_metadata->stats.point_read_result_in_window <<= 1;
-    } else {
+    } else if (vset_->db_options()->point_reads_track_method ==
+               PointReadsTrackMethod::kNaiiveTrack) {
       file_point_read_inc(f->file_metadata, 1);
     }
 
@@ -2560,13 +2597,14 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
     }
     switch (get_context.State()) {
       case GetContext::kNotFound:
-        if (f->file_metadata->bpk != 0.0) {
-          storage_info_.accumulated_num_empty_point_reads_by_file_.fetch_add(1);
-        }
-        if (vset_->db_options()->point_reads_track_method ==
-                PointReadsTrackMethod::kDynamicCompactionAwareTrack &&
-            is_evicted_point_read_existing) {
-          file_existing_point_read_inc(f->file_metadata, 1);
+        if (update_query_stats_flag) {
+          if (f->file_metadata->bpk != 0.0) {
+            storage_info_.accumulated_num_empty_point_reads_by_file_.fetch_add(
+                1);
+          }
+          if (is_evicted_point_read_existing) {
+            file_existing_point_read_inc(f->file_metadata, 1);
+          }
         }
         // Keep searching in other files
         break;
@@ -2574,17 +2612,17 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
         // TODO: update per-level perfcontext user_key_return_count for kMerge
         break;
       case GetContext::kFound:
-        if (vset_->db_options()->point_reads_track_method ==
-            PointReadsTrackMethod::kDynamicCompactionAwareTrack) {
+        if (update_query_stats_flag) {
           f->file_metadata->stats.point_read_result_in_window =
               f->file_metadata->stats.point_read_result_in_window | 0x1;
           if (is_evicted_point_read_existing)
             file_existing_point_read_inc(f->file_metadata, 1);
-        } else {
+          storage_info_.accumulated_num_existing_point_reads_.fetch_add(1);
+        } else if (vset_->db_options()->point_reads_track_method ==
+                   PointReadsTrackMethod::kNaiiveTrack) {
           file_existing_point_read_inc(f->file_metadata, 1);
         }
 
-        storage_info_.accumulated_num_existing_point_reads_.fetch_add(1);
         if (fp.GetHitFileLevel() == 0) {
           RecordTick(db_statistics_, GET_HIT_L0);
         } else if (fp.GetHitFileLevel() == 1) {

@@ -24,10 +24,12 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <queue>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -65,6 +67,7 @@
 #include "util/autovector.h"
 #include "util/coro_utils.h"
 #include "util/hash_containers.h"
+#include "util/random.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -836,11 +839,14 @@ class VersionStorageInfo {
   mutable std::atomic<uint64_t> accumulated_num_empty_point_reads_by_file_;
   mutable uint64_t point_reads_num_when_last_flush_ = 0;
   mutable std::atomic<uint64_t> num_flushes_ = 0;
+  mutable std::thread::id leader_thread_id_;
+  mutable std::mutex thread_ids_mutex_;
 
   mutable BitsPerKeyAllocationType bits_per_key_alloc_type_ =
       BitsPerKeyAllocationType::kDefaultBpkAlloc;
   mutable double common_constant_in_bpk_optimization_ = 0;
   mutable std::unordered_set<size_t> levelIDs_with_bpk0_in_monkey_;
+  mutable std::unordered_set<std::thread::id> thread_ids_;
 
   // the following are the sampled temporary stats.
   // the current accumulated size of sampled files.
