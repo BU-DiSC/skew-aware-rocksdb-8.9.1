@@ -180,6 +180,10 @@ DBOptions BuildDBOptions(const ImmutableDBOptions& immutable_db_options,
   options.enforce_single_del_contracts =
       immutable_db_options.enforce_single_del_contracts;
   options.daily_offpeak_time_utc = mutable_db_options.daily_offpeak_time_utc;
+
+  options.point_reads_track_method = immutable_db_options.point_reads_track_method;
+  options.track_point_read_number_window_size = immutable_db_options.track_point_read_number_window_size;
+  options.point_read_learning_rate = immutable_db_options.point_read_learning_rate;
   return options;
 }
 

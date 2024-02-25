@@ -965,6 +965,16 @@ void ImmutableDBOptions::Dump(Logger* log) const {
                    db_host_id.c_str());
   ROCKS_LOG_HEADER(log, "            Options.enforce_single_del_contracts: %s",
                    enforce_single_del_contracts ? "true" : "false");
+  std::string point_reads_track_method_string = "";
+  if (point_reads_track_method == PointReadsTrackMethod::kNoTrack) {
+    point_reads_track_method_string = "kNoTrack";
+  } else if (point_reads_track_method == PointReadsTrackMethod::kDynamicCompactionAwareTrack) {
+    point_reads_track_method_string = "kDynamicCompactionAwareTrack";
+  } else if (point_reads_track_method == PointReadsTrackMethod::kNaiiveTrack) {
+    point_reads_track_method_string = "kNaiiveTrack";
+  }
+  ROCKS_LOG_HEADER(log, "            Options.point_reads_track_method: %s",
+                   point_reads_track_method_string.c_str());
 }
 
 bool ImmutableDBOptions::IsWalDirSameAsDBPath() const {
