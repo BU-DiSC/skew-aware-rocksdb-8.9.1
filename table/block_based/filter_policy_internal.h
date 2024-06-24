@@ -29,7 +29,7 @@ class FilterBitsBuilder {
   // and duplicated keys are possible, so typically, the builder will
   // only add this key if its hash is different from the most recently
   // added.
-  virtual void AddKey(const Slice& key) = 0;
+  virtual void AddKey(const Slice& key, HashDigest* hash_digest = NULL) = 0;
 
   // Called by RocksDB before Finish to populate
   // TableProperties::num_filter_entries, so should represent the
@@ -94,7 +94,7 @@ class FilterBitsReader {
   virtual ~FilterBitsReader() {}
 
   // Check if the entry match the bits in filter
-  virtual bool MayMatch(const Slice& entry) = 0;
+  virtual bool MayMatch(const Slice& entry, HashDigest* hash_digest = NULL) = 0;
 
   // Check if an array of entries match the bits in filter
   virtual void MayMatch(int num_keys, Slice** keys, bool* may_match) {

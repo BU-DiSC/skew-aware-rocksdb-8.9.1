@@ -1059,42 +1059,113 @@ Status BlockBasedTable::PrefetchIndexAndFilterBlocks(
 
         // For efficiency, do a prefix seek and see if the first match is
         // good.
-        meta_iter->Seek(prefix);
-        if (meta_iter->status().ok() && meta_iter->Valid()) {
-          Slice key = meta_iter->key();
-          if (key.starts_with(prefix)) {
-            key.remove_prefix(prefix.size());
-            if (kBuiltinNameAndAliases.find(key.ToString()) !=
-                kBuiltinNameAndAliases.end()) {
-              Slice v = meta_iter->value();
-              Status s = rep_->filter_handle.DecodeFrom(&v);
-              if (s.ok()) {
-                rep_->filter_type = filter_type;
-                if (filter_type == Rep::FilterType::kNoFilter) {
-                  ROCKS_LOG_WARN(rep_->ioptions.logger,
-                                 "Detected obsolete filter type in %s. Read "
-                                 "performance might suffer until DB is fully "
-                                 "re-compacted.",
-                                 rep_->file->file_name().c_str());
+        if (!rep_->table_options.modular_filters ||
+            rep_->table_properties->num_modules_for_modular_filters == 0) {
+          meta_iter->Seek(prefix);
+          if (meta_iter->status().ok() && meta_iter->Valid()) {
+            Slice key = meta_iter->key();
+            if (key.starts_with(prefix)) {
+              key.remove_prefix(prefix.size());
+              if (kBuiltinNameAndAliases.find(key.ToString()) !=
+                  kBuiltinNameAndAliases.end()) {
+                Slice v = meta_iter->value();
+                Status s = rep_->filter_handle.DecodeFrom(&v);
+                if (s.ok()) {
+                  rep_->filter_type = filter_type;
+                  if (filter_type == Rep::FilterType::kNoFilter) {
+                    ROCKS_LOG_WARN(rep_->ioptions.logger,
+                                   "Detected obsolete filter type in %s. Read "
+                                   "performance might suffer until DB is fully "
+                                   "re-compacted.",
+                                   rep_->file->file_name().c_str());
+                  }
+                  break;
                 }
-                break;
               }
             }
           }
-        }
-      } else {
-        std::string filter_block_key = prefix + name;
-        if (FindMetaBlock(meta_iter, filter_block_key, &rep_->filter_handle)
-                .ok()) {
-          rep_->filter_type = filter_type;
-          if (filter_type == Rep::FilterType::kNoFilter) {
-            ROCKS_LOG_WARN(
-                rep_->ioptions.logger,
-                "Detected obsolete filter type in %s. Read performance might "
-                "suffer until DB is fully re-compacted.",
-                rep_->file->file_name().c_str());
+        } else {
+          bool found_modular_filters = false;
+          rep_->modular_filter_handles = new std::vector<BlockHandle>(
+              rep_->table_properties->num_modules_for_modular_filters);
+          rep_->modular_filter =
+              new std::vector<std::unique_ptr<FilterBlockReader>>(
+                  rep_->table_properties->num_modules_for_modular_filters);
+          std::string new_prefix;
+          for (size_t i = 0;
+               i < rep_->table_properties->num_modules_for_modular_filters;
+               i++) {
+            new_prefix = prefix + BlockBasedTable::kModularFilterBlockMark +
+                         std::to_string(i) + ".";
+            meta_iter->Seek(new_prefix);
+            if (meta_iter->status().ok() && meta_iter->Valid()) {
+              Slice key = meta_iter->key();
+              if (key.starts_with(new_prefix)) {
+                key.remove_prefix(new_prefix.size());
+                if (kBuiltinNameAndAliases.find(key.ToString()) !=
+                    kBuiltinNameAndAliases.end()) {
+                  Slice v = meta_iter->value();
+                  Status s = rep_->modular_filter_handles->at(i).DecodeFrom(&v);
+                  if (s.ok()) {
+                    rep_->filter_type = filter_type;
+                    if (filter_type == Rep::FilterType::kNoFilter) {
+                      ROCKS_LOG_WARN(
+                          rep_->ioptions.logger,
+                          "Detected obsolete filter type in %s. Read "
+                          "performance might suffer until DB is fully "
+                          "re-compacted.",
+                          rep_->file->file_name().c_str());
+                    }
+                    found_modular_filters = true;
+                  }
+                }
+              }
+            }
           }
-          break;
+          if (found_modular_filters) break;
+        }
+
+      } else {
+        if (!rep_->table_options.modular_filters ||
+            rep_->table_properties->num_modules_for_modular_filters == 0) {
+          std::string filter_block_key = prefix + name;
+          if (FindMetaBlock(meta_iter, filter_block_key, &rep_->filter_handle)
+                  .ok()) {
+            rep_->filter_type = filter_type;
+            if (filter_type == Rep::FilterType::kNoFilter) {
+              ROCKS_LOG_WARN(
+                  rep_->ioptions.logger,
+                  "Detected obsolete filter type in %s. Read performance might "
+                  "suffer until DB is fully re-compacted.",
+                  rep_->file->file_name().c_str());
+            }
+            break;
+          }
+        } else {
+          bool found_modular_filters = false;
+          rep_->modular_filter_handles = new std::vector<BlockHandle>(
+              rep_->table_properties->num_modules_for_modular_filters);
+          for (size_t i = 0;
+               i < rep_->table_properties->num_modules_for_modular_filters;
+               i++) {
+            std::string filter_block_key =
+                prefix + BlockBasedTable::kModularFilterBlockMark +
+                std::to_string(i) + "." + name;
+            if (FindMetaBlock(meta_iter, filter_block_key,
+                              &rep_->modular_filter_handles->at(i))
+                    .ok()) {
+              found_modular_filters = true;
+              rep_->filter_type = filter_type;
+              if (filter_type == Rep::FilterType::kNoFilter) {
+                ROCKS_LOG_WARN(rep_->ioptions.logger,
+                               "Detected obsolete filter type in %s. Read "
+                               "performance might "
+                               "suffer until DB is fully re-compacted.",
+                               rep_->file->file_name().c_str());
+              }
+            }
+          }
+          if (found_modular_filters) break;
         }
       }
     }
@@ -1196,19 +1267,43 @@ Status BlockBasedTable::PrefetchIndexAndFilterBlocks(
   const bool prefetch_filter = prefetch_all || pin_filter;
 
   if (rep_->filter_policy) {
-    auto filter = new_table->CreateFilterBlockReader(
-        ro, prefetch_buffer, use_cache, prefetch_filter, pin_filter,
-        lookup_context);
+    if (rep_->table_options.modular_filters &&
+        rep_->table_properties->num_modules_for_modular_filters != 0) {
+      for (size_t i = 0;
+           i < rep_->table_properties->num_modules_for_modular_filters; i++) {
+        auto filter = new_table->CreateFilterBlockReader(
+            ro, prefetch_buffer, use_cache, prefetch_filter, pin_filter,
+            lookup_context, i);
 
-    if (filter) {
-      // Refer to the comment above about paritioned indexes always being cached
-      if (prefetch_all || pin_partition) {
-        s = filter->CacheDependencies(ro, pin_partition, prefetch_buffer);
-        if (!s.ok()) {
-          return s;
+        if (filter) {
+          // Refer to the comment above about paritioned indexes always being
+          // cached
+          if (prefetch_all || pin_partition) {
+            s = filter->CacheDependencies(ro, pin_partition, prefetch_buffer);
+            if (!s.ok()) {
+              return s;
+            }
+          }
+
+          rep_->modular_filter->at(i) = std::move(filter);
         }
       }
-      rep_->filter = std::move(filter);
+    } else {
+      auto filter = new_table->CreateFilterBlockReader(
+          ro, prefetch_buffer, use_cache, prefetch_filter, pin_filter,
+          lookup_context);
+
+      if (filter) {
+        // Refer to the comment above about paritioned indexes always being
+        // cached
+        if (prefetch_all || pin_partition) {
+          s = filter->CacheDependencies(ro, pin_partition, prefetch_buffer);
+          if (!s.ok()) {
+            return s;
+          }
+        }
+        rep_->filter = std::move(filter);
+      }
     }
   }
 
@@ -1324,9 +1419,15 @@ WithBlocklikeCheck<Status, TBlocklike> BlockBasedTable::GetDataBlockFromCache(
     BlockCreateContext create_ctx = rep_->create_context;
     create_ctx.dict = dict;
     assert(!cache_key.empty());
-    auto cache_handle = block_cache.LookupFull(
-        cache_key, &create_ctx, GetCachePriority<TBlocklike>(), statistics,
-        rep_->ioptions.lowest_used_cache_tier);
+    Cache::Priority priority = Cache::Priority::LOW;
+    if (!(get_context != NULL &&
+          get_context->filter_second_high_priority_cache_ &&
+          TBlocklike::kBlockType == BlockType::kFilter)) {
+      priority = GetCachePriority<TBlocklike>();
+    }
+    auto cache_handle =
+        block_cache.LookupFull(cache_key, &create_ctx, priority, statistics,
+                               rep_->ioptions.lowest_used_cache_tier);
 
     // Avoid updating metrics here if the handle is not complete yet. This
     // happens with MultiGet and secondary cache. So update the metrics only
@@ -1412,7 +1513,8 @@ WithBlocklikeCheck<Status, TBlocklike> BlockBasedTable::PutDataBlockToCache(
 
 std::unique_ptr<FilterBlockReader> BlockBasedTable::CreateFilterBlockReader(
     const ReadOptions& ro, FilePrefetchBuffer* prefetch_buffer, bool use_cache,
-    bool prefetch, bool pin, BlockCacheLookupContext* lookup_context) {
+    bool prefetch, bool pin, BlockCacheLookupContext* lookup_context,
+    size_t modular_filter_index) {
   auto& rep = rep_;
   auto filter_type = rep->filter_type;
   if (filter_type == Rep::FilterType::kNoFilter) {
@@ -1424,11 +1526,13 @@ std::unique_ptr<FilterBlockReader> BlockBasedTable::CreateFilterBlockReader(
   switch (filter_type) {
     case Rep::FilterType::kPartitionedFilter:
       return PartitionedFilterBlockReader::Create(
-          this, ro, prefetch_buffer, use_cache, prefetch, pin, lookup_context);
+          this, ro, prefetch_buffer, use_cache, prefetch, pin, lookup_context,
+          modular_filter_index);
 
     case Rep::FilterType::kFullFilter:
       return FullFilterBlockReader::Create(this, ro, prefetch_buffer, use_cache,
-                                           prefetch, pin, lookup_context);
+                                           prefetch, pin, lookup_context,
+                                           modular_filter_index);
 
     default:
       // filter_type is either kNoFilter (exited the function at the first if),
@@ -2037,8 +2141,8 @@ FragmentedRangeTombstoneIterator* BlockBasedTable::NewRangeTombstoneIterator(
 bool BlockBasedTable::FullFilterKeyMayMatch(
     FilterBlockReader* filter, const Slice& internal_key, const bool no_io,
     const SliceTransform* prefix_extractor, GetContext* get_context,
-    BlockCacheLookupContext* lookup_context,
-    const ReadOptions& read_options) const {
+    BlockCacheLookupContext* lookup_context, const ReadOptions& read_options,
+    size_t modular_filter_index) const {
   if (filter == nullptr) {
     return true;
   }
@@ -2049,7 +2153,8 @@ bool BlockBasedTable::FullFilterKeyMayMatch(
   Slice user_key_without_ts = StripTimestampFromUserKey(user_key, ts_sz);
   if (rep_->whole_key_filtering) {
     may_match = filter->KeyMayMatch(user_key_without_ts, no_io, const_ikey_ptr,
-                                    get_context, lookup_context, read_options);
+                                    get_context, lookup_context, read_options,
+                                    modular_filter_index);
     if (may_match) {
       RecordTick(rep_->ioptions.stats, BLOOM_FILTER_FULL_POSITIVE);
       PERF_COUNTER_BY_LEVEL_ADD(bloom_filter_full_positive, 1, rep_->level);
@@ -2212,8 +2317,20 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
   Status s;
   const bool no_io = read_options.read_tier == kBlockCacheTier;
 
-  FilterBlockReader* const filter =
-      !skip_filters ? rep_->filter.get() : nullptr;
+  FilterBlockReader* filter = nullptr;
+
+  size_t modular_filter_index = 0;
+  const bool use_origin_filter =
+      !rep_->table_options.modular_filters ||
+      rep_->table_properties->num_modules_for_modular_filters == 0;
+  if (!skip_filters) {
+    if (use_origin_filter) {
+      filter = rep_->filter.get();
+    } else if (rep_->modular_filter != NULL &&
+               rep_->modular_filter->size() > 0) {
+      filter = rep_->modular_filter->at(modular_filter_index).get();
+    }
+  }
 
   // First check the full filter
   // If full filter not useful, Then go into each block
@@ -2228,9 +2345,27 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
         read_options.snapshot != nullptr;
   }
   TEST_SYNC_POINT("BlockBasedTable::Get:BeforeFilterMatch");
-  const bool may_match =
-      FullFilterKeyMayMatch(filter, key, no_io, prefix_extractor, get_context,
-                            &lookup_context, read_options);
+
+  bool may_match = true;
+  HashDigest origin_hash_digest = get_context->hash_digest_;
+  while (true) {
+    may_match = FullFilterKeyMayMatch(filter, key, no_io, prefix_extractor,
+                                      get_context, &lookup_context,
+                                      read_options, modular_filter_index);
+    if (!use_origin_filter && !skip_filters && may_match &&
+        modular_filter_index + 1 < rep_->modular_filter->size()) {
+      modular_filter_index++;
+      get_context->hash_digest_ =
+          NextHashDigest(origin_hash_digest, modular_filter_index);
+      get_context->filter_second_high_priority_cache_ = true;
+      filter = rep_->modular_filter->at(modular_filter_index).get();
+    } else {
+      break;
+    }
+  }
+  get_context->filter_second_high_priority_cache_ = false;
+  get_context->hash_digest_ = origin_hash_digest;
+
   TEST_SYNC_POINT("BlockBasedTable::Get:AfterFilterMatch");
   if (may_match) {
     IndexBlockIter iiter_on_stack;
@@ -2347,7 +2482,7 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
         break;
       }
     }
-    if (matched && filter != nullptr) {
+    if (matched && (filter != nullptr)) {
       if (rep_->whole_key_filtering) {
         RecordTick(rep_->ioptions.stats, BLOOM_FILTER_FULL_TRUE_POSITIVE);
       } else {

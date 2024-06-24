@@ -49,7 +49,8 @@ class FullFilterBlockBuilder : public FilterBlockBuilder {
   // directly. and be deleted here
   ~FullFilterBlockBuilder() {}
 
-  virtual void Add(const Slice& key_without_ts) override;
+  virtual void Add(const Slice& key_without_ts,
+                   HashDigest* hash_digest = NULL) override;
   virtual bool IsEmpty() const override { return !any_added_; }
   virtual size_t EstimateEntriesAdded() override;
   virtual Slice Finish(
@@ -70,7 +71,7 @@ class FullFilterBlockBuilder : public FilterBlockBuilder {
   }
 
  protected:
-  virtual void AddKey(const Slice& key);
+  virtual void AddKey(const Slice& key, HashDigest* hash_digest = NULL);
   std::unique_ptr<FilterBitsBuilder> filter_bits_builder_;
   virtual void Reset();
   void AddPrefix(const Slice& key);
@@ -107,18 +108,21 @@ class FullFilterBlockReader
   static std::unique_ptr<FilterBlockReader> Create(
       const BlockBasedTable* table, const ReadOptions& ro,
       FilePrefetchBuffer* prefetch_buffer, bool use_cache, bool prefetch,
-      bool pin, BlockCacheLookupContext* lookup_context);
+      bool pin, BlockCacheLookupContext* lookup_context,
+      size_t modular_filiter_index = 1);
 
   bool KeyMayMatch(const Slice& key, const bool no_io,
                    const Slice* const const_ikey_ptr, GetContext* get_context,
                    BlockCacheLookupContext* lookup_context,
-                   const ReadOptions& read_options) override;
+                   const ReadOptions& read_options,
+                   size_t modular_filter_index = 0) override;
 
   bool PrefixMayMatch(const Slice& prefix, const bool no_io,
                       const Slice* const const_ikey_ptr,
                       GetContext* get_context,
                       BlockCacheLookupContext* lookup_context,
-                      const ReadOptions& read_options) override;
+                      const ReadOptions& read_options,
+                      size_t modular_filter_index = 0) override;
 
   void KeysMayMatch(MultiGetRange* range, const bool no_io,
                     BlockCacheLookupContext* lookup_context,
@@ -141,7 +145,8 @@ class FullFilterBlockReader
  private:
   bool MayMatch(const Slice& entry, bool no_io, GetContext* get_context,
                 BlockCacheLookupContext* lookup_context,
-                const ReadOptions& read_options) const;
+                const ReadOptions& read_options,
+                size_t modular_filter_index = 0) const;
   void MayMatch(MultiGetRange* range, bool no_io,
                 const SliceTransform* prefix_extractor,
                 BlockCacheLookupContext* lookup_context,

@@ -66,6 +66,7 @@ struct TablePropertiesNames {
   static const std::string kCompressionOptions;
   static const std::string kCreationTime;
   static const std::string kOldestKeyTime;
+  static const std::string kNumModules;
   static const std::string kFileCreationTime;
   static const std::string kSlowCompressionEstimatedDataSize;
   static const std::string kFastCompressionEstimatedDataSize;
@@ -313,6 +314,8 @@ struct TableProperties {
 
   // Sequence number to time mapping, delta encoded.
   std::string seqno_to_time_mapping;
+
+  uint64_t num_modules_for_modular_filters = 0;
 
   // user collected properties
   UserCollectedProperties user_collected_properties;

@@ -26,7 +26,7 @@ class TestFilterBitsBuilder : public FilterBitsBuilder {
   explicit TestFilterBitsBuilder() {}
 
   // Add Key to filter
-  void AddKey(const Slice& key) override {
+  void AddKey(const Slice& key, HashDigest*) override {
     hash_entries_.push_back(Hash(key.data(), key.size(), 1));
   }
 
@@ -65,7 +65,7 @@ class TestFilterBitsReader : public FilterBitsReader {
 
   // Silence compiler warning about overloaded virtual
   using FilterBitsReader::MayMatch;
-  bool MayMatch(const Slice& entry) override {
+  bool MayMatch(const Slice& entry, HashDigest*) override {
     uint32_t h = Hash(entry.data(), entry.size(), 1);
     for (size_t i = 0; i + 4 <= len_; i += 4) {
       if (h == DecodeFixed32(data_ + i)) {
@@ -199,7 +199,7 @@ class CountUniqueFilterBitsBuilderWrapper : public FilterBitsBuilder {
 
   ~CountUniqueFilterBitsBuilderWrapper() override {}
 
-  void AddKey(const Slice& key) override {
+  void AddKey(const Slice& key, HashDigest*) override {
     b_->AddKey(key);
     uniq_.insert(key.ToString());
   }

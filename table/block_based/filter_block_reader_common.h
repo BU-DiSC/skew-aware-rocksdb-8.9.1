@@ -48,7 +48,8 @@ class FilterBlockReaderCommon : public FilterBlockReader {
                                 const ReadOptions& read_options, bool use_cache,
                                 GetContext* get_context,
                                 BlockCacheLookupContext* lookup_context,
-                                CachableEntry<TBlocklike>* filter_block);
+                                CachableEntry<TBlocklike>* filter_block,
+                                size_t modular_filter_index = 0);
 
   const BlockBasedTable* table() const { return table_; }
   const SliceTransform* table_prefix_extractor() const;
@@ -58,7 +59,8 @@ class FilterBlockReaderCommon : public FilterBlockReader {
   Status GetOrReadFilterBlock(bool no_io, GetContext* get_context,
                               BlockCacheLookupContext* lookup_context,
                               CachableEntry<TBlocklike>* filter_block,
-                              const ReadOptions& read_options) const;
+                              const ReadOptions& read_options,
+                              size_t modular_filter_index = 0) const;
 
   size_t ApproximateFilterBlockMemoryUsage() const;
 

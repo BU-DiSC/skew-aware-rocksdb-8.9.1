@@ -69,6 +69,7 @@ class BlockBasedTable : public TableReader {
  public:
   static const std::string kObsoleteFilterBlockPrefix;
   static const std::string kFullFilterBlockPrefix;
+  static const std::string kModularFilterBlockMark;
   static const std::string kPartitionedFilterBlockPrefix;
 
   // 1-byte compression type + 32-bit checksum
@@ -460,7 +461,8 @@ class BlockBasedTable : public TableReader {
                              const SliceTransform* prefix_extractor,
                              GetContext* get_context,
                              BlockCacheLookupContext* lookup_context,
-                             const ReadOptions& read_options) const;
+                             const ReadOptions& read_options,
+                             size_t modular_filter_index = 0) const;
 
   void FullFilterKeysMayMatch(FilterBlockReader* filter, MultiGetRange* range,
                               const bool no_io,
@@ -507,7 +509,7 @@ class BlockBasedTable : public TableReader {
   std::unique_ptr<FilterBlockReader> CreateFilterBlockReader(
       const ReadOptions& ro, FilePrefetchBuffer* prefetch_buffer,
       bool use_cache, bool prefetch, bool pin,
-      BlockCacheLookupContext* lookup_context);
+      BlockCacheLookupContext* lookup_context, size_t modular_filter_index = 0);
 
   // Size of all data blocks, maybe approximate
   uint64_t GetApproximateDataSize();
@@ -567,7 +569,9 @@ struct BlockBasedTable::Rep {
         table_options(_table_opt),
         filter_policy(skip_filters ? nullptr : _table_opt.filter_policy.get()),
         internal_comparator(_internal_comparator),
+        modular_filter(NULL),
         filter_type(FilterType::kNoFilter),
+        modular_filter_handles(NULL),
         index_type(BlockBasedTableOptions::IndexType::kBinarySearch),
         whole_key_filtering(_table_opt.whole_key_filtering),
         prefix_filtering(true),
@@ -576,7 +580,11 @@ struct BlockBasedTable::Rep {
         level(_level),
         immortal_table(_immortal_table),
         user_defined_timestamps_persisted(_user_defined_timestamps_persisted) {}
-  ~Rep() { status.PermitUncheckedError(); }
+  ~Rep() {
+    if (modular_filter) delete modular_filter;
+    if (modular_filter_handles) delete modular_filter_handles;
+    status.PermitUncheckedError();
+  }
   const ImmutableOptions& ioptions;
   const EnvOptions& env_options;
   const BlockBasedTableOptions table_options;
@@ -592,6 +600,7 @@ struct BlockBasedTable::Rep {
 
   std::unique_ptr<IndexReader> index_reader;
   std::unique_ptr<FilterBlockReader> filter;
+  std::vector<std::unique_ptr<FilterBlockReader>>* modular_filter;
   std::unique_ptr<UncompressionDictReader> uncompression_dict_reader;
 
   enum class FilterType {
@@ -601,6 +610,7 @@ struct BlockBasedTable::Rep {
   };
   FilterType filter_type;
   BlockHandle filter_handle;
+  std::vector<BlockHandle>* modular_filter_handles;
   BlockHandle compression_dict_handle;
 
   std::shared_ptr<const TableProperties> table_properties;

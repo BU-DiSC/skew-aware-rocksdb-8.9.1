@@ -117,8 +117,14 @@ class XXPH3FilterBitsBuilder : public BuiltinFilterBitsBuilder {
 
   ~XXPH3FilterBitsBuilder() override {}
 
-  virtual void AddKey(const Slice& key) override {
-    uint64_t hash = GetSliceHash64(key);
+  virtual void AddKey(const Slice& key, HashDigest* hash_digest) override {
+    uint64_t hash;
+    if (hash_digest) {
+      hash = hash_digest->hash64;
+    } else {
+      hash = GetSliceHash64(key);
+    }
+
     // Especially with prefixes, it is common to have repetition,
     // though only adjacent repetition, which we want to immediately
     // recognize and collapse for estimating true filter space
@@ -574,8 +580,13 @@ class FastLocalBloomBitsReader : public BuiltinFilterBitsReader {
 
   ~FastLocalBloomBitsReader() override {}
 
-  bool MayMatch(const Slice& key) override {
-    uint64_t h = GetSliceHash64(key);
+  bool MayMatch(const Slice& key, HashDigest* hash_digest) override {
+    uint64_t h;
+    if (hash_digest == NULL) {
+      h = GetSliceHash64(key);
+    } else {
+      h = hash_digest->hash64;
+    }
     uint32_t byte_offset;
     FastLocalBloomImpl::PrepareHash(Lower32of64(h), len_bytes_, data_,
                                     /*out*/ &byte_offset);
@@ -1022,8 +1033,13 @@ class Standard128RibbonBitsReader : public BuiltinFilterBitsReader {
 
   ~Standard128RibbonBitsReader() override {}
 
-  bool MayMatch(const Slice& key) override {
-    uint64_t h = GetSliceHash64(key);
+  bool MayMatch(const Slice& key, HashDigest* hash_digest) override {
+    uint64_t h;
+    if (hash_digest == NULL) {
+      h = GetSliceHash64(key);
+    } else {
+      h = hash_digest->hash64;
+    }
     return soln_.FilterQuery(h, hasher_);
   }
 
@@ -1070,7 +1086,7 @@ class LegacyBloomBitsBuilder : public BuiltinFilterBitsBuilder {
 
   ~LegacyBloomBitsBuilder() override;
 
-  void AddKey(const Slice& key) override;
+  void AddKey(const Slice& key, HashDigest* hash_digest = NULL) override;
 
   virtual size_t EstimateEntriesAdded() override {
     return hash_entries_.size();
@@ -1129,8 +1145,13 @@ LegacyBloomBitsBuilder::LegacyBloomBitsBuilder(const int bits_per_key,
 
 LegacyBloomBitsBuilder::~LegacyBloomBitsBuilder() {}
 
-void LegacyBloomBitsBuilder::AddKey(const Slice& key) {
-  uint32_t hash = BloomHash(key);
+void LegacyBloomBitsBuilder::AddKey(const Slice& key, HashDigest* hash_digest) {
+  uint32_t hash;
+  if (hash_digest) {
+    hash = hash_digest->bloom_hash;
+  } else {
+    hash = BloomHash(key);
+  }
   if (hash_entries_.size() == 0 || hash != hash_entries_.back()) {
     hash_entries_.push_back(hash);
   }
@@ -1284,8 +1305,13 @@ class LegacyBloomBitsReader : public BuiltinFilterBitsReader {
   // passed to FilterBitsBuilder::AddKey. This method may return true or false
   // if the key was not on the list, but it should aim to return false with a
   // high probability.
-  bool MayMatch(const Slice& key) override {
-    uint32_t hash = BloomHash(key);
+  bool MayMatch(const Slice& key, HashDigest* hash_digest) override {
+    uint32_t hash;
+    if (hash_digest == NULL) {
+      hash = BloomHash(key);
+    } else {
+      hash = hash_digest->bloom_hash;
+    }
     uint32_t byte_offset;
     LegacyBloomImpl::PrepareHashMayMatch(
         hash, num_lines_, data_, /*out*/ &byte_offset, log2_cache_line_size_);
@@ -1320,7 +1346,7 @@ class LegacyBloomBitsReader : public BuiltinFilterBitsReader {
 
 class AlwaysTrueFilter : public BuiltinFilterBitsReader {
  public:
-  bool MayMatch(const Slice&) override { return true; }
+  bool MayMatch(const Slice&, HashDigest*) override { return true; }
   using FilterBitsReader::MayMatch;  // inherit overload
   bool HashMayMatch(const uint64_t) override { return true; }
   using BuiltinFilterBitsReader::HashMayMatch;  // inherit overload
@@ -1328,7 +1354,7 @@ class AlwaysTrueFilter : public BuiltinFilterBitsReader {
 
 class AlwaysFalseFilter : public BuiltinFilterBitsReader {
  public:
-  bool MayMatch(const Slice&) override { return false; }
+  bool MayMatch(const Slice&, HashDigest*) override { return false; }
   using FilterBitsReader::MayMatch;  // inherit overload
   bool HashMayMatch(const uint64_t) override { return false; }
   using BuiltinFilterBitsReader::HashMayMatch;  // inherit overload

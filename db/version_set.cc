@@ -2516,6 +2516,12 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
       max_covering_tombstone_seq, clock_, seq,
       merge_operator_ ? pinned_iters_mgr : nullptr, callback, is_blob_to_use,
       tracing_get_id, &blob_fetcher);
+  Slice extracted_key =
+      StripTimestampFromUserKey(user_key, user_comparator()->timestamp_size());
+
+  get_context.hash_digest_.bloom_hash = BloomHash(extracted_key);
+  get_context.hash_digest_.hash64 = GetSliceHash64(extracted_key);
+  get_context.hash_digest_.seed = DecodeFixed64(extracted_key.data());
 
   // Pin blocks that we read to hold merge operands
   if (merge_operator_) {
@@ -3260,10 +3266,10 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
         kDynamicCompactionAwareTrack) {
       return false;
     }
-    if (meta->stats.global_point_read_number_window.size() <
-        cfd_->ioptions()->track_point_read_number_window_size) {
-      return false;
-    }
+    // if (meta->stats.global_point_read_number_window.size() <
+    //     cfd_->ioptions()->track_point_read_number_window_size) {
+    //   return false;
+    // }
     result =
         (std::log((meta->num_entries - meta->num_range_deletions) * 1.0 /
                   (num_point_reads - num_existing_point_reads) *

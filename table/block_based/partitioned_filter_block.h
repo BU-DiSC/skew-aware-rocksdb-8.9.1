@@ -36,8 +36,8 @@ class PartitionedFilterBlockBuilder : public FullFilterBlockBuilder {
 
   virtual ~PartitionedFilterBlockBuilder();
 
-  void AddKey(const Slice& key) override;
-  void Add(const Slice& key) override;
+  void AddKey(const Slice& key, HashDigest* hash_digest = NULL) override;
+  void Add(const Slice& key, HashDigest* hash_digest = NULL) override;
   size_t EstimateEntriesAdded() override;
 
   virtual Slice Finish(
@@ -111,12 +111,14 @@ class PartitionedFilterBlockReader
   static std::unique_ptr<FilterBlockReader> Create(
       const BlockBasedTable* table, const ReadOptions& ro,
       FilePrefetchBuffer* prefetch_buffer, bool use_cache, bool prefetch,
-      bool pin, BlockCacheLookupContext* lookup_context);
+      bool pin, BlockCacheLookupContext* lookup_context,
+      size_t modular_filiter_index = 1);
 
   bool KeyMayMatch(const Slice& key, const bool no_io,
                    const Slice* const const_ikey_ptr, GetContext* get_context,
                    BlockCacheLookupContext* lookup_context,
-                   const ReadOptions& read_options) override;
+                   const ReadOptions& read_options,
+                   size_t modular_filter_index = 0) override;
   void KeysMayMatch(MultiGetRange* range, const bool no_io,
                     BlockCacheLookupContext* lookup_context,
                     const ReadOptions& read_options) override;
@@ -125,7 +127,8 @@ class PartitionedFilterBlockReader
                       const Slice* const const_ikey_ptr,
                       GetContext* get_context,
                       BlockCacheLookupContext* lookup_context,
-                      const ReadOptions& read_options) override;
+                      const ReadOptions& read_options,
+                      size_t modular_filter_index = 0) override;
   void PrefixesMayMatch(MultiGetRange* range,
                         const SliceTransform* prefix_extractor,
                         const bool no_io,
@@ -147,12 +150,12 @@ class PartitionedFilterBlockReader
   using FilterFunction = bool (FullFilterBlockReader::*)(
       const Slice& slice, const bool no_io, const Slice* const const_ikey_ptr,
       GetContext* get_context, BlockCacheLookupContext* lookup_context,
-      const ReadOptions& read_options);
+      const ReadOptions& read_options, size_t modular_filter_index);
   bool MayMatch(const Slice& slice, bool no_io, const Slice* const_ikey_ptr,
                 GetContext* get_context,
                 BlockCacheLookupContext* lookup_context,
-                const ReadOptions& read_options,
-                FilterFunction filter_function) const;
+                const ReadOptions& read_options, FilterFunction filter_function,
+                size_t modular_filter_index = 0) const;
   using FilterManyFunction = void (FullFilterBlockReader::*)(
       MultiGetRange* range, const SliceTransform* prefix_extractor,
       const bool no_io, BlockCacheLookupContext* lookup_context,

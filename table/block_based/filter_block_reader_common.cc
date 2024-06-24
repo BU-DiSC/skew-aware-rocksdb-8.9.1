@@ -18,7 +18,7 @@ Status FilterBlockReaderCommon<TBlocklike>::ReadFilterBlock(
     const BlockBasedTable* table, FilePrefetchBuffer* prefetch_buffer,
     const ReadOptions& read_options, bool use_cache, GetContext* get_context,
     BlockCacheLookupContext* lookup_context,
-    CachableEntry<TBlocklike>* filter_block) {
+    CachableEntry<TBlocklike>* filter_block, size_t modular_filter_index) {
   PERF_TIMER_GUARD(read_filter_block_nanos);
 
   assert(table);
@@ -28,12 +28,25 @@ Status FilterBlockReaderCommon<TBlocklike>::ReadFilterBlock(
   const BlockBasedTable::Rep* const rep = table->get_rep();
   assert(rep);
 
-  const Status s = table->RetrieveBlock(
-      prefetch_buffer, read_options, rep->filter_handle,
-      UncompressionDict::GetEmptyDict(), filter_block, get_context,
-      lookup_context,
-      /* for_compaction */ false, use_cache,
-      /* async_read */ false, /* use_block_cache_for_lookup */ true);
+  Status s;
+  if (rep->table_options.modular_filters &&
+      rep->table_properties->num_modules_for_modular_filters != 0) {
+    s = table->RetrieveBlock(
+        prefetch_buffer, read_options,
+        rep->modular_filter_handles->at(modular_filter_index),
+        UncompressionDict::GetEmptyDict(), filter_block, get_context,
+        lookup_context,
+        /* for_compaction */ false, use_cache,
+        /* async_read */ false,
+        /* use_block_cache_for_lookup */ true);
+  } else {
+    s = table->RetrieveBlock(prefetch_buffer, read_options, rep->filter_handle,
+                             UncompressionDict::GetEmptyDict(), filter_block,
+                             get_context, lookup_context,
+                             /* for_compaction */ false, use_cache,
+                             /* async_read */ false,
+                             /* use_block_cache_for_lookup */ true);
+  }
 
   return s;
 }
@@ -69,8 +82,8 @@ template <typename TBlocklike>
 Status FilterBlockReaderCommon<TBlocklike>::GetOrReadFilterBlock(
     bool no_io, GetContext* get_context,
     BlockCacheLookupContext* lookup_context,
-    CachableEntry<TBlocklike>* filter_block,
-    const ReadOptions& read_options) const {
+    CachableEntry<TBlocklike>* filter_block, const ReadOptions& read_options,
+    size_t modular_filter_index) const {
   assert(filter_block);
 
   if (!filter_block_.IsEmpty()) {
@@ -85,7 +98,7 @@ Status FilterBlockReaderCommon<TBlocklike>::GetOrReadFilterBlock(
 
   return ReadFilterBlock(table_, nullptr /* prefetch_buffer */, ro,
                          cache_filter_blocks(), get_context, lookup_context,
-                         filter_block);
+                         filter_block, modular_filter_index);
 }
 
 template <typename TBlocklike>

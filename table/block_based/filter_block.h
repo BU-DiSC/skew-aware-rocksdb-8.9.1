@@ -53,7 +53,8 @@ class FilterBlockBuilder {
   virtual ~FilterBlockBuilder() {}
 
   virtual void Add(
-      const Slice& key_without_ts) = 0;  // Add a key to current filter
+      const Slice& key_without_ts,
+      HashDigest* hash_digest = NULL) = 0;  // Add a key to current filter
   virtual bool IsEmpty() const = 0;      // Empty == none added
   // For reporting stats on how many entries the builder considered unique
   virtual size_t EstimateEntriesAdded() = 0;
@@ -115,7 +116,8 @@ class FilterBlockReader {
                            const Slice* const const_ikey_ptr,
                            GetContext* get_context,
                            BlockCacheLookupContext* lookup_context,
-                           const ReadOptions& read_options) = 0;
+                           const ReadOptions& read_options,
+                           size_t modular_filter_index = 0) = 0;
 
   virtual void KeysMayMatch(MultiGetRange* range, const bool no_io,
                             BlockCacheLookupContext* lookup_context,
@@ -138,7 +140,8 @@ class FilterBlockReader {
                               const Slice* const const_ikey_ptr,
                               GetContext* get_context,
                               BlockCacheLookupContext* lookup_context,
-                              const ReadOptions& read_options) = 0;
+                              const ReadOptions& read_options,
+                              size_t modular_filter_index = 0) = 0;
 
   virtual void PrefixesMayMatch(MultiGetRange* range,
                                 const SliceTransform* prefix_extractor,

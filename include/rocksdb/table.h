@@ -131,6 +131,37 @@ enum BitsPerKeyAllocationType : char {
   kWorkloadAwareBpkAlloc = 0x3,
 };
 
+struct HashDigest {
+  uint32_t bloom_hash;
+  uint64_t hash64;
+  uint64_t seed;
+};
+
+inline HashDigest NextHashDigest(const HashDigest hash_digest, uint32_t index) {
+  if (index == 0) return hash_digest;
+  uint32_t second_bloom_hash = hash_digest.bloom_hash;
+  uint64_t second_hash64 = hash_digest.hash64;
+  size_t i = 0;
+  while (i < index) {  // permute hash digest
+    second_bloom_hash += 0xc6a4a793 * hash_digest.seed;
+    second_bloom_hash += (second_bloom_hash >> 17) | (second_bloom_hash << 15);
+    second_bloom_hash *= 0xbc9f1d34;
+    second_bloom_hash += (second_bloom_hash >> 15) | (second_bloom_hash << 17);
+
+    second_hash64 += 0xC2B2AE3D27D4EB4FU * hash_digest.seed;
+    second_hash64 += (second_hash64 >> 37) | (second_hash64 << 27);
+    second_hash64 *= 0x165667919E3779F9U;
+    second_hash64 += (second_hash64 >> 27) | (second_hash64 << 37);
+    i++;
+  }
+
+  HashDigest result{
+      .bloom_hash = hash_digest.bloom_hash + index * second_bloom_hash,
+      .hash64 = hash_digest.hash64 + index * second_hash64,
+      .seed = hash_digest.seed};
+  return result;
+}
+
 // For advanced user only
 struct BlockBasedTableOptions {
   static const char* kName() { return "BlockTableOptions"; };
@@ -406,6 +437,14 @@ struct BlockBasedTableOptions {
   // incompatible with block-based filters. Filter partition blocks use
   // block cache even when cache_index_and_filter_blocks=false.
   bool partition_filters = false;
+
+  // use multiple bloom filters for each SST file. The maximum bits-per-key
+  // per filter is no more than user-specified bits-per-key plus 1 to avoid
+  // fragmented filter blocks (bits-perk-key < 1). Bits-per-key is
+  // dynamically determined during construction
+  bool modular_filters = false;
+  double max_bits_per_key_granularity = 6.0;
+  size_t max_modulars = 6;
 
   // Option to generate Bloom/Ribbon filters that minimize memory
   // internal fragmentation.

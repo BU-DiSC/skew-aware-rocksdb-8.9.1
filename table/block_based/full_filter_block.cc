@@ -34,7 +34,8 @@ size_t FullFilterBlockBuilder::EstimateEntriesAdded() {
   return filter_bits_builder_->EstimateEntriesAdded();
 }
 
-void FullFilterBlockBuilder::Add(const Slice& key_without_ts) {
+void FullFilterBlockBuilder::Add(const Slice& key_without_ts,
+                                 HashDigest* hash_digest) {
   const bool add_prefix =
       prefix_extractor_ && prefix_extractor_->InDomain(key_without_ts);
 
@@ -48,7 +49,7 @@ void FullFilterBlockBuilder::Add(const Slice& key_without_ts) {
 
   if (whole_key_filtering_) {
     if (!add_prefix) {
-      AddKey(key_without_ts);
+      AddKey(key_without_ts, hash_digest);
     } else {
       // if both whole_key and prefix are added to bloom then we will have whole
       // key_without_ts and prefix addition being interleaved and thus cannot
@@ -57,7 +58,7 @@ void FullFilterBlockBuilder::Add(const Slice& key_without_ts) {
       Slice last_whole_key = Slice(last_whole_key_str_);
       if (!last_whole_key_recorded_ ||
           last_whole_key.compare(key_without_ts) != 0) {
-        AddKey(key_without_ts);
+        AddKey(key_without_ts, hash_digest);
         last_whole_key_recorded_ = true;
         last_whole_key_str_.assign(key_without_ts.data(),
                                    key_without_ts.size());
@@ -73,8 +74,9 @@ void FullFilterBlockBuilder::Add(const Slice& key_without_ts) {
 }
 
 // Add key to filter if needed
-inline void FullFilterBlockBuilder::AddKey(const Slice& key) {
-  filter_bits_builder_->AddKey(key);
+inline void FullFilterBlockBuilder::AddKey(const Slice& key,
+                                           HashDigest* hash_digest) {
+  filter_bits_builder_->AddKey(key, hash_digest);
   any_added_ = true;
 }
 
@@ -127,17 +129,20 @@ bool FullFilterBlockReader::KeyMayMatch(const Slice& key, const bool no_io,
                                         const Slice* const /*const_ikey_ptr*/,
                                         GetContext* get_context,
                                         BlockCacheLookupContext* lookup_context,
-                                        const ReadOptions& read_options) {
+                                        const ReadOptions& read_options,
+                                        size_t modular_filter_index) {
   if (!whole_key_filtering()) {
     return true;
   }
-  return MayMatch(key, no_io, get_context, lookup_context, read_options);
+  return MayMatch(key, no_io, get_context, lookup_context, read_options,
+                  modular_filter_index);
 }
 
 std::unique_ptr<FilterBlockReader> FullFilterBlockReader::Create(
     const BlockBasedTable* table, const ReadOptions& ro,
     FilePrefetchBuffer* prefetch_buffer, bool use_cache, bool prefetch,
-    bool pin, BlockCacheLookupContext* lookup_context) {
+    bool pin, BlockCacheLookupContext* lookup_context,
+    size_t modular_filiter_index) {
   assert(table);
   assert(table->get_rep());
   assert(!pin || prefetch);
@@ -146,7 +151,7 @@ std::unique_ptr<FilterBlockReader> FullFilterBlockReader::Create(
   if (prefetch || !use_cache) {
     const Status s = ReadFilterBlock(table, prefetch_buffer, ro, use_cache,
                                      nullptr /* get_context */, lookup_context,
-                                     &filter_block);
+                                     &filter_block, modular_filiter_index);
     if (!s.ok()) {
       IGNORE_STATUS_IF_ERROR(s);
       return std::unique_ptr<FilterBlockReader>();
@@ -164,18 +169,22 @@ std::unique_ptr<FilterBlockReader> FullFilterBlockReader::Create(
 bool FullFilterBlockReader::PrefixMayMatch(
     const Slice& prefix, const bool no_io,
     const Slice* const /*const_ikey_ptr*/, GetContext* get_context,
-    BlockCacheLookupContext* lookup_context, const ReadOptions& read_options) {
-  return MayMatch(prefix, no_io, get_context, lookup_context, read_options);
+    BlockCacheLookupContext* lookup_context, const ReadOptions& read_options,
+    size_t modular_filter_index) {
+  return MayMatch(prefix, no_io, get_context, lookup_context, read_options,
+                  modular_filter_index);
 }
 
 bool FullFilterBlockReader::MayMatch(const Slice& entry, bool no_io,
                                      GetContext* get_context,
                                      BlockCacheLookupContext* lookup_context,
-                                     const ReadOptions& read_options) const {
+                                     const ReadOptions& read_options,
+                                     size_t modular_filter_index) const {
   CachableEntry<ParsedFullFilterBlock> filter_block;
 
-  const Status s = GetOrReadFilterBlock(no_io, get_context, lookup_context,
-                                        &filter_block, read_options);
+  const Status s =
+      GetOrReadFilterBlock(no_io, get_context, lookup_context, &filter_block,
+                           read_options, modular_filter_index);
   if (!s.ok()) {
     IGNORE_STATUS_IF_ERROR(s);
     return true;
@@ -186,8 +195,10 @@ bool FullFilterBlockReader::MayMatch(const Slice& entry, bool no_io,
   FilterBitsReader* const filter_bits_reader =
       filter_block.GetValue()->filter_bits_reader();
 
+  HashDigest* hash_digest = NULL;
+  if (get_context) hash_digest = &get_context->hash_digest_;
   if (filter_bits_reader) {
-    if (filter_bits_reader->MayMatch(entry)) {
+    if (filter_bits_reader->MayMatch(entry, hash_digest)) {
       PERF_COUNTER_ADD(bloom_sst_hit_count, 1);
       return true;
     } else {

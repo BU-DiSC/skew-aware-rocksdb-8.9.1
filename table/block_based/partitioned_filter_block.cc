@@ -115,13 +115,15 @@ void PartitionedFilterBlockBuilder::MaybeCutAFilterBlock(
   Reset();
 }
 
-void PartitionedFilterBlockBuilder::Add(const Slice& key) {
+void PartitionedFilterBlockBuilder::Add(const Slice& key,
+                                        HashDigest* hash_digest) {
   MaybeCutAFilterBlock(&key);
-  FullFilterBlockBuilder::Add(key);
+  FullFilterBlockBuilder::Add(key, hash_digest);
 }
 
-void PartitionedFilterBlockBuilder::AddKey(const Slice& key) {
-  FullFilterBlockBuilder::AddKey(key);
+void PartitionedFilterBlockBuilder::AddKey(const Slice& key,
+                                           HashDigest* hash_digest) {
+  FullFilterBlockBuilder::AddKey(key, hash_digest);
   keys_added_to_partition_++;
 }
 
@@ -200,7 +202,8 @@ PartitionedFilterBlockReader::PartitionedFilterBlockReader(
 std::unique_ptr<FilterBlockReader> PartitionedFilterBlockReader::Create(
     const BlockBasedTable* table, const ReadOptions& ro,
     FilePrefetchBuffer* prefetch_buffer, bool use_cache, bool prefetch,
-    bool pin, BlockCacheLookupContext* lookup_context) {
+    bool pin, BlockCacheLookupContext* lookup_context,
+    size_t modular_filter_index) {
   assert(table);
   assert(table->get_rep());
   assert(!pin || prefetch);
@@ -209,7 +212,7 @@ std::unique_ptr<FilterBlockReader> PartitionedFilterBlockReader::Create(
   if (prefetch || !use_cache) {
     const Status s = ReadFilterBlock(table, prefetch_buffer, ro, use_cache,
                                      nullptr /* get_context */, lookup_context,
-                                     &filter_block);
+                                     &filter_block, modular_filter_index);
     if (!s.ok()) {
       IGNORE_STATUS_IF_ERROR(s);
       return std::unique_ptr<FilterBlockReader>();
@@ -227,14 +230,15 @@ std::unique_ptr<FilterBlockReader> PartitionedFilterBlockReader::Create(
 bool PartitionedFilterBlockReader::KeyMayMatch(
     const Slice& key, const bool no_io, const Slice* const const_ikey_ptr,
     GetContext* get_context, BlockCacheLookupContext* lookup_context,
-    const ReadOptions& read_options) {
+    const ReadOptions& read_options, size_t modular_filter_index) {
   assert(const_ikey_ptr != nullptr);
   if (!whole_key_filtering()) {
     return true;
   }
 
   return MayMatch(key, no_io, const_ikey_ptr, get_context, lookup_context,
-                  read_options, &FullFilterBlockReader::KeyMayMatch);
+                  read_options, &FullFilterBlockReader::KeyMayMatch,
+                  modular_filter_index);
 }
 
 void PartitionedFilterBlockReader::KeysMayMatch(
@@ -251,10 +255,11 @@ void PartitionedFilterBlockReader::KeysMayMatch(
 bool PartitionedFilterBlockReader::PrefixMayMatch(
     const Slice& prefix, const bool no_io, const Slice* const const_ikey_ptr,
     GetContext* get_context, BlockCacheLookupContext* lookup_context,
-    const ReadOptions& read_options) {
+    const ReadOptions& read_options, size_t modular_filter_index) {
   assert(const_ikey_ptr != nullptr);
   return MayMatch(prefix, no_io, const_ikey_ptr, get_context, lookup_context,
-                  read_options, &FullFilterBlockReader::PrefixMayMatch);
+                  read_options, &FullFilterBlockReader::PrefixMayMatch,
+                  modular_filter_index);
 }
 
 void PartitionedFilterBlockReader::PrefixesMayMatch(
@@ -330,7 +335,8 @@ Status PartitionedFilterBlockReader::GetFilterPartitionBlock(
 bool PartitionedFilterBlockReader::MayMatch(
     const Slice& slice, bool no_io, const Slice* const_ikey_ptr,
     GetContext* get_context, BlockCacheLookupContext* lookup_context,
-    const ReadOptions& read_options, FilterFunction filter_function) const {
+    const ReadOptions& read_options, FilterFunction filter_function,
+    size_t modular_filter_index) const {
   CachableEntry<Block_kFilterPartitionIndex> filter_block;
   Status s = GetOrReadFilterBlock(no_io, get_context, lookup_context,
                                   &filter_block, read_options);
@@ -360,7 +366,8 @@ bool PartitionedFilterBlockReader::MayMatch(
   FullFilterBlockReader filter_partition(table(),
                                          std::move(filter_partition_block));
   return (filter_partition.*filter_function)(
-      slice, no_io, const_ikey_ptr, get_context, lookup_context, read_options);
+      slice, no_io, const_ikey_ptr, get_context, lookup_context, read_options,
+      modular_filter_index);
 }
 
 void PartitionedFilterBlockReader::MayMatch(

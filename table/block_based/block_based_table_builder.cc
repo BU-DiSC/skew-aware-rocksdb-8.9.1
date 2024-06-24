@@ -346,6 +346,8 @@ struct BlockBasedTableBuilder::Rep {
       compression_dict_buffer_cache_res_mgr;
   const bool use_delta_encoding_for_index_values;
   std::unique_ptr<FilterBlockBuilder> filter_builder;
+  std::vector<std::unique_ptr<FilterBlockBuilder>> modular_filter_builders;
+
   OffsetableCacheKey base_cache_key;
   const TableFileCreationReason reason;
 
@@ -573,6 +575,16 @@ struct BlockBasedTableBuilder::Rep {
           ioptions, tbo.moptions, filter_context,
           use_delta_encoding_for_index_values, p_index_builder_, ts_sz,
           persist_user_defined_timestamps));
+      if (table_options.modular_filters) {
+        modular_filter_builders.clear();
+        modular_filter_builders.resize(table_options.max_modulars);
+        for (size_t i = 0; i < table_options.max_modulars; i++) {
+          modular_filter_builders[i].reset(CreateFilterBlockBuilder(
+              ioptions, tbo.moptions, filter_context,
+              use_delta_encoding_for_index_values, p_index_builder_, ts_sz,
+              persist_user_defined_timestamps));
+        }
+      }
     }
 
     assert(tbo.int_tbl_prop_collector_factories);
@@ -1044,9 +1056,24 @@ void BlockBasedTableBuilder::Add(const Slice& key, const Slice& value) {
       if (r->IsParallelCompressionEnabled()) {
         r->pc_rep->curr_block_keys->PushBack(key);
       } else {
-        if (r->filter_builder != nullptr) {
-          r->filter_builder->Add(
-              ExtractUserKeyAndStripTimestamp(key, r->ts_sz));
+        const Slice extracted_key =
+            ExtractUserKeyAndStripTimestamp(key, r->ts_sz);
+        HashDigest hash_digest{.bloom_hash = BloomHash(extracted_key),
+                               .hash64 = GetSliceHash64(extracted_key),
+                               .seed = DecodeFixed64(extracted_key.data())};
+        if (r->table_options.modular_filters) {
+          size_t i = 0;
+          HashDigest new_hash_digest = hash_digest;
+          for (auto& modular_filter_builder : r->modular_filter_builders) {
+            if (modular_filter_builder) {
+              new_hash_digest = NextHashDigest(hash_digest, i++);
+              modular_filter_builder->Add(extracted_key, &new_hash_digest);
+            }
+          }
+        } else {
+          if (r->filter_builder != nullptr) {
+            r->filter_builder->Add(extracted_key, &hash_digest);
+          }
         }
       }
     }
@@ -1303,7 +1330,8 @@ void BlockBasedTableBuilder::CompressAndVerifyBlock(
 
 void BlockBasedTableBuilder::WriteMaybeCompressedBlock(
     const Slice& block_contents, CompressionType comp_type, BlockHandle* handle,
-    BlockType block_type, const Slice* uncompressed_block_data) {
+    BlockType block_type, const Slice* uncompressed_block_data,
+    size_t modular_filter_index) {
   // File format contains a sequence of blocks where each block has:
   //    block_data: uint8[n]
   //    compression_type: uint8
@@ -1338,7 +1366,15 @@ void BlockBasedTableBuilder::WriteMaybeCompressedBlock(
   checksum += ChecksumModifierForContext(r->base_context_checksum, offset);
 
   if (block_type == BlockType::kFilter) {
-    Status s = r->filter_builder->MaybePostVerifyFilter(block_contents);
+    Status s;
+    if (r->table_options.modular_filters &&
+        r->props.num_modules_for_modular_filters != 0) {
+      s = r->modular_filter_builders[modular_filter_index]
+              ->MaybePostVerifyFilter(block_contents);
+    } else {
+      s = r->filter_builder->MaybePostVerifyFilter(block_contents);
+    }
+
     if (!s.ok()) {
       r->SetStatus(s);
       return;
@@ -1425,9 +1461,28 @@ void BlockBasedTableBuilder::BGWorkWriteMaybeCompressedBlock() {
 
     for (size_t i = 0; i < block_rep->keys->Size(); i++) {
       auto& key = (*block_rep->keys)[i];
-      if (r->filter_builder != nullptr) {
-        r->filter_builder->Add(ExtractUserKeyAndStripTimestamp(key, r->ts_sz));
+      const Slice& extracted_key =
+          ExtractUserKeyAndStripTimestamp(key, r->ts_sz);
+      HashDigest hash_digest{.bloom_hash = BloomHash(extracted_key),
+                             .hash64 = GetSliceHash64(extracted_key),
+                             .seed = DecodeFixed64(extracted_key.data())};
+      if (r->table_options.modular_filters) {
+        if (!r->modular_filter_builders.empty()) {
+          uint32_t j = 0;
+          HashDigest new_hash_digest = hash_digest;
+          for (auto& modular_filter_builder : r->modular_filter_builders) {
+            if (modular_filter_builder) {
+              new_hash_digest = NextHashDigest(hash_digest, j++);
+              modular_filter_builder->Add(extracted_key, &new_hash_digest);
+            }
+          }
+        }
+      } else {
+        if (r->filter_builder != nullptr) {
+          r->filter_builder->Add(extracted_key, &hash_digest);
+        }
       }
+
       r->index_builder->OnKeyAdded(key);
     }
 
@@ -1516,53 +1571,115 @@ Status BlockBasedTableBuilder::InsertBlockInCacheHelper(
 
 void BlockBasedTableBuilder::WriteFilterBlock(
     MetaIndexBuilder* meta_index_builder) {
-  if (rep_->filter_builder == nullptr || rep_->filter_builder->IsEmpty()) {
-    // No filter block needed
-    return;
+  bool is_modular_filter = rep_->table_options.modular_filters &&
+                           rep_->props.num_modules_for_modular_filters != 0;
+  if (!is_modular_filter) {
+    if (rep_->table_options.modular_filters) {
+      rep_->filter_builder.reset();
+      if (!rep_->modular_filter_builders.empty()) {
+        rep_->filter_builder = std::move(rep_->modular_filter_builders[0]);
+      }
+    }
+    if (rep_->filter_builder == nullptr || rep_->filter_builder->IsEmpty()) {
+      // No filter block needed
+      return;
+    }
+  } else {
+    if (rep_->modular_filter_builders.empty()) {
+      // No filter block needed
+      return;
+    }
+    if (rep_->modular_filter_builders[0] == nullptr ||
+        rep_->modular_filter_builders[0]->IsEmpty()) {
+      return;
+    }
   }
-  BlockHandle filter_block_handle;
+
   bool is_partitioned_filter = rep_->table_options.partition_filters;
   if (ok()) {
-    rep_->props.num_filter_entries +=
-        rep_->filter_builder->EstimateEntriesAdded();
-    Status s = Status::Incomplete();
-    while (ok() && s.IsIncomplete()) {
-      // filter_data is used to store the transferred filter data payload from
-      // FilterBlockBuilder and deallocate the payload by going out of scope.
-      // Otherwise, the payload will unnecessarily remain until
-      // BlockBasedTableBuilder is deallocated.
-      //
-      // See FilterBlockBuilder::Finish() for more on the difference in
-      // transferred filter data payload among different FilterBlockBuilder
-      // subtypes.
-      std::unique_ptr<const char[]> filter_data;
-      Slice filter_content =
-          rep_->filter_builder->Finish(filter_block_handle, &s, &filter_data);
+    if (is_modular_filter) {
+      rep_->props.num_filter_entries +=
+          rep_->modular_filter_builders[0]->EstimateEntriesAdded();
+    } else {
+      rep_->props.num_filter_entries +=
+          rep_->filter_builder->EstimateEntriesAdded();
+    }
 
-      assert(s.ok() || s.IsIncomplete() || s.IsCorruption());
-      if (s.IsCorruption()) {
-        rep_->SetStatus(s);
-        break;
+    Status s = Status::Incomplete();
+
+    size_t modular_filter_index = 0;
+    while (true) {
+      BlockHandle filter_block_handle;
+
+      while (ok() && s.IsIncomplete()) {
+        // filter_data is used to store the transferred filter data payload from
+        // FilterBlockBuilder and deallocate the payload by going out of scope.
+        // Otherwise, the payload will unnecessarily remain until
+        // BlockBasedTableBuilder is deallocated.
+        //
+        // See FilterBlockBuilder::Finish() for more on the difference in
+        // transferred filter data payload among different FilterBlockBuilder
+        // subtypes.
+        std::unique_ptr<const char[]> filter_data;
+        Slice filter_content;
+
+        if (is_modular_filter) {
+          filter_content =
+              rep_->modular_filter_builders[modular_filter_index]->Finish(
+                  filter_block_handle, &s, &filter_data);
+        } else {
+          filter_content = rep_->filter_builder->Finish(filter_block_handle, &s,
+                                                        &filter_data);
+        }
+
+        assert(s.ok() || s.IsIncomplete() || s.IsCorruption());
+        if (s.IsCorruption()) {
+          rep_->SetStatus(s);
+          break;
+        }
+
+        rep_->props.filter_size += filter_content.size();
+
+        BlockType btype = is_partitioned_filter && /* last */ s.ok()
+                              ? BlockType::kFilterPartitionIndex
+                              : BlockType::kFilter;
+        WriteMaybeCompressedBlock(filter_content, kNoCompression,
+                                  &filter_block_handle, btype, nullptr,
+                                  modular_filter_index);
       }
 
-      rep_->props.filter_size += filter_content.size();
+      s = Status::Incomplete();
 
-      BlockType btype = is_partitioned_filter && /* last */ s.ok()
-                            ? BlockType::kFilterPartitionIndex
-                            : BlockType::kFilter;
-      WriteMaybeCompressedBlock(filter_content, kNoCompression,
-                                &filter_block_handle, btype);
+      if (is_modular_filter) {
+        rep_->modular_filter_builders[modular_filter_index]
+            ->ResetFilterBitsBuilder();
+      } else {
+        rep_->filter_builder->ResetFilterBitsBuilder();
+      }
+
+      if (ok()) {
+        // Add mapping from "<filter_block_prefix>.Name" to location
+        // of filter data.
+        std::string key;
+        key = is_partitioned_filter
+                  ? BlockBasedTable::kPartitionedFilterBlockPrefix
+                  : BlockBasedTable::kFullFilterBlockPrefix;
+        if (is_modular_filter) {
+          key.append(BlockBasedTable::kModularFilterBlockMark +
+                     std::to_string(modular_filter_index) + ".");
+        }
+        key.append(rep_->table_options.filter_policy->CompatibilityName());
+        meta_index_builder->Add(key, filter_block_handle);
+      }
+
+      modular_filter_index++;
+      if (!is_modular_filter ||
+          modular_filter_index == rep_->modular_filter_builders.size() ||
+          modular_filter_index == rep_->props.num_modules_for_modular_filters ||
+          rep_->modular_filter_builders[modular_filter_index] == nullptr ||
+          rep_->modular_filter_builders[modular_filter_index]->IsEmpty())
+        break;
     }
-    rep_->filter_builder->ResetFilterBitsBuilder();
-  }
-  if (ok()) {
-    // Add mapping from "<filter_block_prefix>.Name" to location
-    // of filter data.
-    std::string key;
-    key = is_partitioned_filter ? BlockBasedTable::kPartitionedFilterBlockPrefix
-                                : BlockBasedTable::kFullFilterBlockPrefix;
-    key.append(rep_->table_options.filter_policy->CompatibilityName());
-    meta_index_builder->Add(key, filter_block_handle);
   }
 }
 
@@ -1925,17 +2042,32 @@ void BlockBasedTableBuilder::EnterUnbuffered() {
     } else {
       for (; iter->Valid(); iter->Next()) {
         Slice key = iter->key();
-        if (r->filter_builder != nullptr) {
-          r->filter_builder->Add(
-              ExtractUserKeyAndStripTimestamp(key, r->ts_sz));
+        const Slice& extracted_key =
+            ExtractUserKeyAndStripTimestamp(key, r->ts_sz);
+        HashDigest hash_digest{.bloom_hash = BloomHash(extracted_key),
+                               .hash64 = GetSliceHash64(extracted_key),
+                               .seed = DecodeFixed64(extracted_key.data())};
+        if (!r->table_options.modular_filters) {
+          if (r->filter_builder != nullptr) {
+            r->filter_builder->Add(extracted_key, &hash_digest);
+          }
+        } else {
+          uint32_t j = 0;
+          HashDigest new_hash_digest = hash_digest;
+          for (auto& modular_filter_builder : r->modular_filter_builders) {
+            if (modular_filter_builder != nullptr) {
+              new_hash_digest = NextHashDigest(hash_digest, j++);
+              modular_filter_builder->Add(extracted_key, &new_hash_digest);
+            }
+          }
         }
+
         r->index_builder->OnKeyAdded(key);
       }
       WriteBlock(Slice(data_block), &r->pending_handle, BlockType::kData);
       if (ok() && i + 1 < r->data_block_buffers.size()) {
         assert(next_block_iter != nullptr);
         Slice first_key_in_next_block = next_block_iter->key();
-
         Slice* first_key_in_next_block_ptr = &first_key_in_next_block;
 
         iter->SeekToLast();
@@ -2039,15 +2171,46 @@ bool BlockBasedTableBuilder::IsEmpty() const {
 }
 
 void BlockBasedTableBuilder::ResetFilterBitsPerKey(double bits_per_key) {
-  if (rep_->filter_builder == nullptr || rep_->filter_builder->IsEmpty()) {
+  if (!rep_->table_options.modular_filters &&
+      (rep_->filter_builder == nullptr || rep_->filter_builder->IsEmpty())) {
     // No filter block needed
     return;
   }
-  if (bits_per_key < 1.0) {
-    rep_->filter_builder.reset();
+  if (bits_per_key < 1.0 && rep_->filter_builder) {
     return;
   }
-  rep_->filter_builder->ResetFilterBitsPerKey(bits_per_key);
+  if (rep_->table_options.modular_filters) {
+    size_t modular_filter_index = 0;
+    double max_bits_per_key_granularity =
+        rep_->table_options.max_bits_per_key_granularity;
+    double next_bits_per_key;
+    while (bits_per_key > 0) {
+      // avoid fragmented bits-per-key
+      next_bits_per_key = max_bits_per_key_granularity;
+      if ((next_bits_per_key > bits_per_key) ||
+          (next_bits_per_key < bits_per_key &&
+           next_bits_per_key + 1 > bits_per_key)) {
+        next_bits_per_key = bits_per_key;
+      }
+      rep_->modular_filter_builders[modular_filter_index]
+          ->ResetFilterBitsPerKey(next_bits_per_key);
+      bits_per_key -= next_bits_per_key;
+      modular_filter_index++;
+
+      // ignore more bits-per-key if the maximum number of modulars is reached
+      if (rep_->modular_filter_builders.size() <= modular_filter_index) {
+        bits_per_key = 0;
+      }
+    }
+    rep_->props.num_modules_for_modular_filters = modular_filter_index;
+    for (size_t i = modular_filter_index;
+         i < rep_->modular_filter_builders.size(); i++) {
+      rep_->modular_filter_builders[i].reset();
+    }
+
+  } else {
+    rep_->filter_builder->ResetFilterBitsPerKey(bits_per_key);
+  }
 }
 
 uint64_t BlockBasedTableBuilder::FileSize() const { return rep_->offset; }
@@ -2101,6 +2264,7 @@ void BlockBasedTableBuilder::SetSeqnoTimeTableProperties(
 
 const std::string BlockBasedTable::kObsoleteFilterBlockPrefix = "filter.";
 const std::string BlockBasedTable::kFullFilterBlockPrefix = "fullfilter.";
+const std::string BlockBasedTable::kModularFilterBlockMark = "Modular.";
 const std::string BlockBasedTable::kPartitionedFilterBlockPrefix =
     "partitionedfilter.";
 }  // namespace ROCKSDB_NAMESPACE

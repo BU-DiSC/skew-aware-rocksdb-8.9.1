@@ -616,7 +616,7 @@ namespace {
 
 class AlwaysTrueBitsBuilder : public FilterBitsBuilder {
  public:
-  void AddKey(const Slice&) override {}
+  void AddKey(const Slice&, HashDigest*) override {}
   size_t EstimateEntriesAdded() override { return 0U; }
   Slice Finish(std::unique_ptr<const char[]>* /* buf */) override {
     // Interpreted as "always true" filter (0 probes over 1 byte of

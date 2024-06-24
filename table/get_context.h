@@ -7,6 +7,7 @@
 #include <string>
 
 #include "db/read_callback.h"
+#include "rocksdb/table.h"
 #include "rocksdb/types.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -189,6 +190,9 @@ class GetContext {
   uint64_t get_tracing_get_id() const { return tracing_get_id_; }
 
   void push_operand(const Slice& value, Cleanable* value_pinner);
+
+  HashDigest hash_digest_;
+  bool filter_second_high_priority_cache_ = false;
 
  private:
   // Helper method that postprocesses the results of merge operations, e.g. it
