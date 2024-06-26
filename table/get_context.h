@@ -193,6 +193,7 @@ class GetContext {
 
   HashDigest hash_digest_;
   bool filter_second_high_priority_cache_ = false;
+  uint8_t max_accessed_modulars_ = 1;
 
  private:
   // Helper method that postprocesses the results of merge operations, e.g. it

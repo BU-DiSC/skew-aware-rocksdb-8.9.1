@@ -31,11 +31,23 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
   bpk_alloc_type_ = tbo.bpk_alloc_type;
 
   if (bpk_alloc_type_ == BitsPerKeyAllocationType::kDefaultBpkAlloc) return;
+  if (bpk_alloc_type_ == BitsPerKeyAllocationType::kNaiveMonkeyBpkAlloc) {
+    int output_level = 0;
+    if (compaction != NULL) {
+      output_level = compaction->output_level();
+    }
+    if (output_level < (int)tbo.naive_monkey_bpk_list.size()) {
+      naive_monkey_bpk = tbo.naive_monkey_bpk_list[output_level];
+    } else {
+      naive_monkey_bpk = overall_bits_per_key;
+    }
+    return;
+  }
   uint64_t tmp_num_entries_in_filter_by_file = 0;
-  if (bpk_alloc_type_ == BitsPerKeyAllocationType::kMonkeyBpkAlloc ||
+  if (bpk_alloc_type_ == BitsPerKeyAllocationType::kDynamicMonkeyBpkAlloc ||
       (bpk_alloc_type_ == BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc &&
        vstorage_->GetAccumulatedNumPointReads() == 0)) {
-    bpk_alloc_type_ = BitsPerKeyAllocationType::kMonkeyBpkAlloc;
+    bpk_alloc_type_ = BitsPerKeyAllocationType::kDynamicMonkeyBpkAlloc;
 
     if (compaction == nullptr &&
         !flush_flag_) {  // skip the preparation phase for flush
@@ -142,7 +154,7 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
             std::log(num_entries_in_filter_by_level) *
             num_entries_in_filter_by_level;
       }
-      monkey_num_entries_ += num_entries_in_filter_by_level;
+      dynamic_monkey_num_entries_ += num_entries_in_filter_by_level;
     }
     if (added_entries_in_max_level > 0 && max_level == 0) {
       level_states_pq_.push(
@@ -150,12 +162,12 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
       temp_sum_in_bpk_optimization_ +=
           std::log(added_entries_in_max_level) * added_entries_in_max_level;
     }
-    total_bits_for_filter_ = monkey_num_entries_ * overall_bits_per_key;
+    total_bits_for_filter_ = dynamic_monkey_num_entries_ * overall_bits_per_key;
     common_constant_in_bpk_optimization_ =
         -(total_bits_for_filter_ * log_2_squared +
           temp_sum_in_bpk_optimization_) /
-        monkey_num_entries_;
-    std::unordered_set<size_t> levelIDs_with_bpk0_in_monkey;
+        dynamic_monkey_num_entries_;
+    std::unordered_set<size_t> levelIDs_with_bpk0_in_dynamic_monkey;
     while (!level_states_pq_.empty() &&
            std::log(level_states_pq_.top().num_entries) +
                    common_constant_in_bpk_optimization_ >
@@ -167,24 +179,27 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
           }
         }
       } else {
-        levelIDs_with_bpk0_in_monkey.insert(level_states_pq_.top().level);
+        levelIDs_with_bpk0_in_dynamic_monkey.insert(
+            level_states_pq_.top().level);
       }
       tmp_num_entries_in_filter_by_file = level_states_pq_.top().num_entries;
       temp_sum_in_bpk_optimization_ -=
           std::log(tmp_num_entries_in_filter_by_file) *
           tmp_num_entries_in_filter_by_file;
-      monkey_num_entries_ -= tmp_num_entries_in_filter_by_file;
+      dynamic_monkey_num_entries_ -= tmp_num_entries_in_filter_by_file;
       common_constant_in_bpk_optimization_ =
           -(total_bits_for_filter_ * log_2_squared +
             temp_sum_in_bpk_optimization_) /
-          monkey_num_entries_;
+          dynamic_monkey_num_entries_;
       level_states_pq_.pop();
     }
 
-    vstorage_->SetLevelIDsWithEmptyBpkInMonkey(levelIDs_with_bpk0_in_monkey);
+    vstorage_->SetLevelIDsWithEmptyBpkInDynamicMonkey(
+        levelIDs_with_bpk0_in_dynamic_monkey);
 
     if (!level_states_pq_.empty()) {
-      monkey_bpk_num_entries_threshold_ = level_states_pq_.top().num_entries;
+      dynamic_monkey_bpk_num_entries_threshold_ =
+          level_states_pq_.top().num_entries;
     }
   } else if (bpk_alloc_type_ ==
              BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc) {
@@ -319,9 +334,9 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
         std::log(file_workload_state_pq_.top().weight * total_empty_queries_) +
                 common_constant_in_bpk_optimization_ >
             -log_2_squared) {
-      // if (file_workload_state_pq_.top().meta != nullptr) {
-      //  file_workload_state_pq_.top().meta->bpk = 0.0;
-      // }
+      if (file_workload_state_pq_.top().meta != nullptr) {
+        file_workload_state_pq_.top().meta->bpk = 0.0;
+      }
       weight = file_workload_state_pq_.top().weight;
       temp_sum_in_bpk_optimization_ -=
           std::log(weight * total_empty_queries_) *
@@ -359,22 +374,27 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
   if (bpk_alloc_type_ == BitsPerKeyAllocationType::kDefaultBpkAlloc)
     return false;
   assert(bits_per_key);
+  if (bpk_alloc_type_ == BitsPerKeyAllocationType::kNaiveMonkeyBpkAlloc) {
+    *bits_per_key = naive_monkey_bpk;
+    return true;
+  }
 
-  if (bpk_alloc_type_ == BitsPerKeyAllocationType::kMonkeyBpkAlloc ||
+  if (bpk_alloc_type_ == BitsPerKeyAllocationType::kDynamicMonkeyBpkAlloc ||
       (bpk_alloc_type_ == BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc &&
        vstorage_->GetAccumulatedNumPointReads() == 0)) {
     if (!bpk_optimization_prepared_flag_) {
       flush_flag_ = true;
       temp_sum_in_bpk_optimization_ +=
           num_entries_in_output_level * std::log(num_entries_in_output_level);
-      monkey_num_entries_ += num_entries_in_output_level;
+      dynamic_monkey_num_entries_ += num_entries_in_output_level;
       level_states_pq_.push(
           LevelState(0, num_entries_in_output_level, meta.fd.GetNumber()));
       PrepareBpkAllocation();
     }
 
     // for bits-per-key < 1, give it 1 if it is larger than or equal to 0.5
-    if (/*num_entries_in_output_level > monkey_bpk_num_entries_threshold_ ||*/
+    if (/*num_entries_in_output_level >
+           dynamic_monkey_bpk_num_entries_threshold_ ||*/
         std::log(num_entries_in_output_level) +
             common_constant_in_bpk_optimization_ >
         -log_2_squared * 0.5) {

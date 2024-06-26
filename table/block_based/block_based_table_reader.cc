@@ -1264,7 +1264,7 @@ Status BlockBasedTable::PrefetchIndexAndFilterBlocks(
   // prefetch the first level of filter
   // WART: this might be redundant (unnecessary cache hit) if !pin_filter,
   // depending on prepopulate_block_cache option
-  const bool prefetch_filter = prefetch_all || pin_filter;
+  bool prefetch_filter = prefetch_all || pin_filter;
 
   if (rep_->filter_policy) {
     if (rep_->table_options.modular_filters &&
@@ -1274,7 +1274,7 @@ Status BlockBasedTable::PrefetchIndexAndFilterBlocks(
         auto filter = new_table->CreateFilterBlockReader(
             ro, prefetch_buffer, use_cache, prefetch_filter, pin_filter,
             lookup_context, i);
-
+        prefetch_filter = false;  // only prefetch the first modular filter
         if (filter) {
           // Refer to the comment above about paritioned indexes always being
           // cached
@@ -2353,7 +2353,8 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
                                       get_context, &lookup_context,
                                       read_options, modular_filter_index);
     if (!use_origin_filter && !skip_filters && may_match &&
-        modular_filter_index + 1 < rep_->modular_filter->size()) {
+        modular_filter_index + 1 < rep_->modular_filter->size() &&
+        modular_filter_index + 1 < get_context->max_accessed_modulars_) {
       modular_filter_index++;
       get_context->hash_digest_ =
           NextHashDigest(origin_hash_digest, modular_filter_index);
@@ -2365,6 +2366,7 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
   }
   get_context->filter_second_high_priority_cache_ = false;
   get_context->hash_digest_ = origin_hash_digest;
+  get_context->max_accessed_modulars_ = 1;
 
   TEST_SYNC_POINT("BlockBasedTable::Get:AfterFilterMatch");
   if (may_match) {

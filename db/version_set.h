@@ -688,12 +688,12 @@ class VersionStorageInfo {
     return common_constant_in_bpk_optimization_;
   }
 
-  void SetLevelIDsWithEmptyBpkInMonkey(
+  void SetLevelIDsWithEmptyBpkInDynamicMonkey(
       const std::unordered_set<size_t>& _levelIDs_with_bpk0_in_monkey) const {
     levelIDs_with_bpk0_in_monkey_ = _levelIDs_with_bpk0_in_monkey;
   }
 
-  bool IsFilterSkippedWithEmptyBpkInMonkey(size_t level) const {
+  bool IsFilterSkippedWithEmptyBpkInDynamicMonkey(size_t level) const {
     return levelIDs_with_bpk0_in_monkey_.find(level) !=
            levelIDs_with_bpk0_in_monkey_.end();
   }
@@ -1158,7 +1158,8 @@ class Version {
   // the filter block may already be cached, but we still do not access it such
   // that it eventually expires from the cache.
   bool IsFilterSkipped(int level, bool is_file_last_in_level = false,
-                       const FileMetaData* meta = nullptr);
+                       const FileMetaData* meta = nullptr,
+                       uint8_t* max_accessed_modulars = nullptr);
 
   // The helper function of UpdateAccumulatedStats, which may fill the missing
   // fields of file_meta from its associated TableProperties.
@@ -1222,6 +1223,12 @@ class Version {
   uint64_t version_number_;
   std::shared_ptr<IOTracer> io_tracer_;
   bool use_async_io_;
+  // for modular filter skipping
+  double overall_bits_per_key_;
+  double max_bits_per_key_granularity_;
+  uint64_t max_modulars_in_cache_;
+  size_t data_block_size_;
+  uint32_t max_modulars_;
 
   Version(ColumnFamilyData* cfd, VersionSet* vset, const FileOptions& file_opt,
           MutableCFOptions mutable_cf_options,

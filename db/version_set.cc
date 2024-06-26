@@ -45,6 +45,8 @@
 #include "db/wide/wide_columns_helper.h"
 #include "file/file_util.h"
 #include "logging/logging.h"
+#include "table/block_based/block_based_table_factory.h"
+#include "table/block_based/filter_policy_internal.h"
 #include "table/compaction_merging_iterator.h"
 
 #if USE_COROUTINES
@@ -97,6 +99,8 @@
 namespace ROCKSDB_NAMESPACE {
 
 namespace {
+
+const double log_2_squared = std::pow(std::log(2), 2);
 
 // Find File in LevelFilesBrief data structure
 // Within an index range defined by left and right
@@ -2312,6 +2316,39 @@ Version::Version(ColumnFamilyData* column_family_data, VersionSet* vset,
                             FSSupportedOps::kAsyncIO)) {
     use_async_io_ = true;
   }
+
+  max_modulars_in_cache_ = 0;
+  data_block_size_ = 1;
+  overall_bits_per_key_ = 0.0;
+  max_bits_per_key_granularity_ = 0.0;
+  max_modulars_ = 1;
+  if (cfd_ != nullptr && cfd_->ioptions() != nullptr) {
+    if (cfd_->ioptions()->table_factory != nullptr) {
+      if (strcmp(cfd_->ioptions()->table_factory->Name(),
+                 TableFactory::kBlockBasedTableName()) == 0) {
+        const BlockBasedTableOptions tbo =
+            std::static_pointer_cast<BlockBasedTableFactory>(
+                cfd_->ioptions()->table_factory)
+                ->GetBlockBasedTableOptions();
+        if (tbo.filter_policy != nullptr) {
+          overall_bits_per_key_ =
+              std::static_pointer_cast<const BloomLikeFilterPolicy>(
+                  tbo.filter_policy)
+                  ->GetBitsPerKey();
+        }
+        max_bits_per_key_granularity_ = tbo.max_bits_per_key_granularity;
+        if (tbo.block_cache) {
+          uint32_t num_entries_per_file =
+              mutable_cf_options_.target_file_size_base / tbo.block_size;
+          max_modulars_in_cache_ =
+              tbo.block_cache->GetCapacity() /
+              (num_entries_per_file * max_bits_per_key_granularity_);
+        }
+        data_block_size_ = tbo.block_size;
+        max_modulars_ = tbo.max_modulars;
+      }
+    }
+  }
 }
 
 Status Version::GetBlob(const ReadOptions& read_options, const Slice& user_key,
@@ -2575,14 +2612,15 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
         GetPerfLevel() >= PerfLevel::kEnableTimeExceptForMutex &&
         get_perf_context()->per_level_perf_context_enabled;
     StopWatchNano timer(clock_, timer_enabled /* auto_start */);
+    bool skip_filter = IsFilterSkipped(
+        static_cast<int>(fp.GetHitFileLevel()), fp.IsHitFileLastInLevel(),
+        f->file_metadata, &get_context.max_accessed_modulars_);
     *status = table_cache_->Get(
         read_options, *internal_comparator(), *f->file_metadata, ikey,
         &get_context, mutable_cf_options_.block_protection_bytes_per_key,
         mutable_cf_options_.prefix_extractor,
         cfd_->internal_stats()->GetFileReadHist(fp.GetHitFileLevel()),
-        IsFilterSkipped(static_cast<int>(fp.GetHitFileLevel()),
-                        fp.IsHitFileLastInLevel(), f->file_metadata),
-        fp.GetHitFileLevel(), max_file_size_for_l0_meta_pin_);
+        skip_filter, fp.GetHitFileLevel(), max_file_size_for_l0_meta_pin_);
     // TODO: examine the behavior for corrupted key
     if (timer_enabled) {
       PERF_COUNTER_BY_LEVEL_ADD(get_from_table_nanos, timer.ElapsedNanos(),
@@ -3219,7 +3257,10 @@ Status Version::MultiGetAsync(
 #endif
 
 bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
-                              const FileMetaData* meta) {
+                              const FileMetaData* meta,
+                              uint8_t* max_accessed_modulars) {
+  // read no modules by default
+  if (max_accessed_modulars) *max_accessed_modulars = 0;
   // Reaching the bottom level implies misses at all upper levels, so we'll
   // skip checking the filters when we predict a hit.
   bool result = cfd_->ioptions()->optimize_filters_for_hits &&
@@ -3232,13 +3273,17 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
     return result;
   }
 
-  if (meta->bpk == 0)
+  // we already mark the bpk as 0 for each FileMetaData that is supposed to be
+  // skipped, so in most cases we can read the filter if bpk is not 0.
+  if (meta->bpk == 0) {
     return true;  // bpk == 0 means we choose not to build filter, thus we
                   // should skip it
+  }
 
   if (storage_info_.GetBitsPerKeyAllocationType() ==
-      BitsPerKeyAllocationType::kMonkeyBpkAlloc) {
-    return storage_info_.IsFilterSkippedWithEmptyBpkInMonkey(level);
+      BitsPerKeyAllocationType::kDynamicMonkeyBpkAlloc) {
+    if (max_accessed_modulars) *max_accessed_modulars = max_modulars_;
+    return storage_info_.IsFilterSkippedWithEmptyBpkInDynamicMonkey(level);
   } else if (storage_info_.GetBitsPerKeyAllocationType() ==
              BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc) {
     std::pair<uint64_t, uint64_t> num_point_read_stats =
@@ -3250,33 +3295,66 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
     if (num_point_reads == 0) {
       meta->stats.start_global_point_read_number =
           storage_info_.GetAccumulatedNumPointReads();
+      // first time read a file, only read the first module
+      if (max_accessed_modulars) *max_accessed_modulars = 1;
       return false;
     }
     if (num_point_reads <= num_existing_point_reads ||
         storage_info_.accumulated_num_empty_point_reads_by_file_ == 0) {
+      // all queries are existing queries, we can skip all the modules
       return true;
     }
-    // we already mark the bpk as 0 for each FileMetaData that is supposed to be
-    // skipped, so in most cases we can read the filter if bpk is not 0.
-    // However, in case of workload shifting, we can use dynamic tracking method
-    // to re-evaluate whether we need to skip the current filter when we have
-    // sufficient recent data (the tracking window is fulfilled, otherwise we
-    // still read the filter)
-    if (cfd_->ioptions()->point_reads_track_method !=
-        kDynamicCompactionAwareTrack) {
-      return false;
-    }
-    // if (meta->stats.global_point_read_number_window.size() <
-    //     cfd_->ioptions()->track_point_read_number_window_size) {
-    //   return false;
+
+    // if (cfd_->ioptions()->point_reads_track_method !=
+    //    kDynamicCompactionAwareTrack) {
+    //  return false;
     // }
+
+    uint64_t num_empty_point_reads = num_point_reads - num_existing_point_reads;
+
     result =
         (std::log((meta->num_entries - meta->num_range_deletions) * 1.0 /
-                  (num_point_reads - num_existing_point_reads) *
+                  num_empty_point_reads *
                   storage_info_.accumulated_num_empty_point_reads_by_file_.load(
                       std::memory_order_relaxed)) +
          storage_info_.GetBitsPerKeyCommonConstant()) > 0;
-    return result;
+    // skip this filter if no bpk should be assigned
+    if (result || max_accessed_modulars == NULL) return result;
+    *max_accessed_modulars = max_modulars_;
+    /*
+    size_t filter_size = 0;
+    double bpk = 0.0;
+    double last_fpr = 1.0;
+    double fpr = 0.0;
+    if (meta->bpk == -1) {
+      bpk = overall_bits_per_key_;
+    } else {
+      bpk = std::min(meta->bpk, max_bits_per_key_granularity_);
+    }
+    filter_size = bpk*(meta->num_entries - meta->num_range_deletions)/8;
+    fpr = std::exp(-1.0 * bpk * log_2_squared);
+
+    double expected_accesses = 0.0;
+    while (true) {
+      expected_accesses = num_empty_point_reads*last_fpr +
+    num_existing_point_reads;
+      if(std::log(filter_size*1.0/data_block_size_*expected_accesses/((1.0 -
+    fpr)*num_empty_point_reads*last_fpr)) < -std::log(1.0 -
+    expected_accesses*1.0/storage_info_.GetAccumulatedNumPointReads())*max_modulars_in_cache_
+    - 1) {
+        (*max_accessed_modulars)++;
+        result = false;
+        last_fpr *= fpr;
+        if (bpk <= max_bits_per_key_granularity_) return result;
+        bpk -= max_bits_per_key_granularity_;
+        fpr = std::exp(-1.0 * bpk * log_2_squared);
+        filter_size = bpk*(meta->num_entries - meta->num_range_deletions)/8;
+      } else {
+        if (*max_accessed_modulars == 0) result = true;
+        break;
+      }
+    }
+    return result;*/
   }
   return false;
 }

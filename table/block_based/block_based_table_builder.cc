@@ -365,6 +365,8 @@ struct BlockBasedTableBuilder::Rep {
   // all blocks after data blocks till the end of the SST file.
   uint64_t tail_size;
 
+  uint64_t all_except_first_modular_filter_block_size;
+
   // See class Footer
   uint32_t base_context_checksum;
 
@@ -1596,6 +1598,7 @@ void BlockBasedTableBuilder::WriteFilterBlock(
   }
 
   bool is_partitioned_filter = rep_->table_options.partition_filters;
+  rep_->all_except_first_modular_filter_block_size = 0;
   if (ok()) {
     if (is_modular_filter) {
       rep_->props.num_filter_entries +=
@@ -1606,7 +1609,10 @@ void BlockBasedTableBuilder::WriteFilterBlock(
     }
 
     Status s = Status::Incomplete();
-
+    size_t max_modular_filter_index =
+        std::min(rep_->props.num_modules_for_modular_filters,
+                 rep_->modular_filter_builders.size()) -
+        1;
     size_t modular_filter_index = 0;
     while (true) {
       BlockHandle filter_block_handle;
@@ -1625,8 +1631,9 @@ void BlockBasedTableBuilder::WriteFilterBlock(
 
         if (is_modular_filter) {
           filter_content =
-              rep_->modular_filter_builders[modular_filter_index]->Finish(
-                  filter_block_handle, &s, &filter_data);
+              rep_->modular_filter_builders[max_modular_filter_index -
+                                            modular_filter_index]
+                  ->Finish(filter_block_handle, &s, &filter_data);
         } else {
           filter_content = rep_->filter_builder->Finish(filter_block_handle, &s,
                                                         &filter_data);
@@ -1640,18 +1647,25 @@ void BlockBasedTableBuilder::WriteFilterBlock(
 
         rep_->props.filter_size += filter_content.size();
 
+        if (is_modular_filter && max_modular_filter_index > 0 &&
+            modular_filter_index < max_modular_filter_index) {
+          rep_->all_except_first_modular_filter_block_size +=
+              filter_content.size();
+        }
+
         BlockType btype = is_partitioned_filter && /* last */ s.ok()
                               ? BlockType::kFilterPartitionIndex
                               : BlockType::kFilter;
-        WriteMaybeCompressedBlock(filter_content, kNoCompression,
-                                  &filter_block_handle, btype, nullptr,
-                                  modular_filter_index);
+        WriteMaybeCompressedBlock(
+            filter_content, kNoCompression, &filter_block_handle, btype,
+            nullptr, max_modular_filter_index - modular_filter_index);
       }
 
       s = Status::Incomplete();
 
       if (is_modular_filter) {
-        rep_->modular_filter_builders[modular_filter_index]
+        rep_->modular_filter_builders[max_modular_filter_index -
+                                      modular_filter_index]
             ->ResetFilterBitsBuilder();
       } else {
         rep_->filter_builder->ResetFilterBitsBuilder();
@@ -1665,19 +1679,17 @@ void BlockBasedTableBuilder::WriteFilterBlock(
                   ? BlockBasedTable::kPartitionedFilterBlockPrefix
                   : BlockBasedTable::kFullFilterBlockPrefix;
         if (is_modular_filter) {
-          key.append(BlockBasedTable::kModularFilterBlockMark +
-                     std::to_string(modular_filter_index) + ".");
+          key.append(
+              BlockBasedTable::kModularFilterBlockMark +
+              std::to_string(max_modular_filter_index - modular_filter_index) +
+              ".");
         }
         key.append(rep_->table_options.filter_policy->CompatibilityName());
         meta_index_builder->Add(key, filter_block_handle);
       }
 
       modular_filter_index++;
-      if (!is_modular_filter ||
-          modular_filter_index == rep_->modular_filter_builders.size() ||
-          modular_filter_index == rep_->props.num_modules_for_modular_filters ||
-          rep_->modular_filter_builders[modular_filter_index] == nullptr ||
-          rep_->modular_filter_builders[modular_filter_index]->IsEmpty())
+      if (!is_modular_filter || modular_filter_index > max_modular_filter_index)
         break;
     }
   }
@@ -2140,6 +2152,10 @@ Status BlockBasedTableBuilder::Finish() {
   }
   r->state = Rep::State::kClosed;
   r->tail_size = r->offset - r->props.tail_start_offset;
+  if (r->all_except_first_modular_filter_block_size > 0 &&
+      r->all_except_first_modular_filter_block_size < r->tail_size) {
+    r->tail_size -= r->all_except_first_modular_filter_block_size;
+  }
 
   Status ret_status = r->CopyStatus();
   IOStatus ios = r->GetIOStatus();

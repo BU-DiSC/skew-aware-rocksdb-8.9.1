@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "rocksdb/cache.h"
 #include "rocksdb/customizable.h"
@@ -127,8 +128,9 @@ struct CacheUsageOptions {
 
 enum BitsPerKeyAllocationType : char {
   kDefaultBpkAlloc = 0x1,
-  kMonkeyBpkAlloc = 0x2,
-  kWorkloadAwareBpkAlloc = 0x3,
+  kNaiveMonkeyBpkAlloc = 0x2,
+  kDynamicMonkeyBpkAlloc = 0x3,
+  kWorkloadAwareBpkAlloc = 0x4,
 };
 
 struct HashDigest {
@@ -295,6 +297,8 @@ struct BlockBasedTableOptions {
 
   BitsPerKeyAllocationType bpk_alloc_type =
       BitsPerKeyAllocationType::kDefaultBpkAlloc;
+
+  std::vector<double> naive_monkey_bpk_list;
 
   // Disable block cache. If this is set to true,
   // then no block cache should be used, and the block_cache should
