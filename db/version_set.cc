@@ -3237,8 +3237,8 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
                   // should skip it
 
   if (storage_info_.GetBitsPerKeyAllocationType() ==
-      BitsPerKeyAllocationType::kMonkeyBpkAlloc) {
-    return storage_info_.IsFilterSkippedWithEmptyBpkInMonkey(level);
+      BitsPerKeyAllocationType::kDynamicMonkeyBpkAlloc) {
+    return storage_info_.IsFilterSkippedWithEmptyBpkInDynamicMonkey(level);
   } else if (storage_info_.GetBitsPerKeyAllocationType() ==
              BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc) {
     std::pair<uint64_t, uint64_t> num_point_read_stats =

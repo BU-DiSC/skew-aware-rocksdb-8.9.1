@@ -688,12 +688,12 @@ class VersionStorageInfo {
     return common_constant_in_bpk_optimization_;
   }
 
-  void SetLevelIDsWithEmptyBpkInMonkey(
+  void SetLevelIDsWithEmptyBpkInDynamicMonkey(
       const std::unordered_set<size_t>& _levelIDs_with_bpk0_in_monkey) const {
     levelIDs_with_bpk0_in_monkey_ = _levelIDs_with_bpk0_in_monkey;
   }
 
-  bool IsFilterSkippedWithEmptyBpkInMonkey(size_t level) const {
+  bool IsFilterSkippedWithEmptyBpkInDynamicMonkey(size_t level) const {
     return levelIDs_with_bpk0_in_monkey_.find(level) !=
            levelIDs_with_bpk0_in_monkey_.end();
   }

@@ -33,12 +33,13 @@ class BitsPerKeyAllocHelper {
   BitsPerKeyAllocationType bpk_alloc_type_ =
       BitsPerKeyAllocationType::kDefaultBpkAlloc;
   bool flush_flag_ = false;
+  double naive_monkey_bpk = 0.0;
   bool bpk_optimization_prepared_flag_ = false;
   double workload_aware_bpk_weight_threshold_ =
       std::numeric_limits<double>::max();
-  uint64_t monkey_bpk_num_entries_threshold_ =
+  uint64_t dynamic_monkey_bpk_num_entries_threshold_ =
       std::numeric_limits<uint64_t>::max();
-  uint64_t monkey_num_entries_ = 0;
+  uint64_t dynamic_monkey_num_entries_ = 0;
   uint64_t workload_aware_num_entries_ = 0;
   uint64_t workload_aware_num_entries_with_empty_queries_ = 0;
   double temp_sum_in_bpk_optimization_ = 0;
