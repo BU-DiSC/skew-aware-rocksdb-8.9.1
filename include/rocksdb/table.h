@@ -447,8 +447,10 @@ struct BlockBasedTableOptions {
   // fragmented filter blocks (bits-perk-key < 1). Bits-per-key is
   // dynamically determined during construction
   bool modular_filters = false;
+  bool no_filter_optimize_for_level0 = false;
   double max_bits_per_key_granularity = 6.0;
   size_t max_modulars = 6;
+  double est_filter_fraction_in_cache = 0.25;
 
   // Option to generate Bloom/Ribbon filters that minimize memory
   // internal fragmentation.

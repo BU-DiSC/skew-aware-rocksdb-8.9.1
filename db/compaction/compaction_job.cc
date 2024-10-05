@@ -190,6 +190,8 @@ CompactionJob::CompactionJob(
       bg_bottom_compaction_scheduled_(bg_bottom_compaction_scheduled) {
   assert(compaction_job_stats_ != nullptr);
   assert(log_buffer_ != nullptr);
+  bpk_alloc_helper_ = new BitsPerKeyAllocHelper(compaction->immutable_options(),
+                                                compaction->input_vstorage());
 
   const auto* cfd = compact_->compaction->column_family_data();
   ThreadStatusUtil::SetEnableTracking(db_options_.enable_thread_tracking);
@@ -201,6 +203,9 @@ CompactionJob::CompactionJob(
 CompactionJob::~CompactionJob() {
   assert(compact_ == nullptr);
   ThreadStatusUtil::ResetThreadStatus();
+  if (bpk_alloc_helper_ != nullptr) {
+    delete bpk_alloc_helper_;
+  }
 }
 
 void CompactionJob::ReportStartedCompaction(Compaction* compaction) {
@@ -629,6 +634,12 @@ Status CompactionJob::Run() {
   const size_t num_threads = compact_->sub_compact_states.size();
   assert(num_threads > 0);
   const uint64_t start_micros = db_options_.clock->NowMicros();
+  if (bpk_alloc_helper_) {
+    bpk_alloc_helper_->PrepareBpkAllocation(compact_->compaction);
+    compact_->compaction->input_vstorage()->SetBpkCommonConstant(
+        bpk_alloc_helper_->bpk_alloc_type_,
+        bpk_alloc_helper_->common_constant_in_bpk_optimization_);
+  }
 
   // Launch a thread for each of subcompactions 1...num_threads-1
   std::vector<port::Thread> thread_pool;
@@ -1540,6 +1551,7 @@ Status CompactionJob::FinishCompactionOutputFile(
       ThreadStatus::STAGE_COMPACTION_SYNC_FILE);
   assert(sub_compact != nullptr);
   assert(outputs.HasBuilder());
+  outputs.SetBpkAllocHelper(bpk_alloc_helper_);
 
   FileMetaData* meta = outputs.GetMetaData();
   uint64_t output_number = meta->fd.GetNumber();

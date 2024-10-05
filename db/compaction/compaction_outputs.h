@@ -193,6 +193,10 @@ class CompactionOutputs {
     return range_del_agg_ && !range_del_agg_->IsEmpty();
   }
 
+  void SetBpkAllocHelper(BitsPerKeyAllocHelper* bpk_alloc_helper) {
+    bpk_alloc_helper_ = bpk_alloc_helper;
+  }
+
  private:
   friend class SubcompactionState;
 
@@ -227,11 +231,6 @@ class CompactionOutputs {
       // May happen if we get a shutdown call in the middle of compaction
       builder_->Abandon();
       builder_.reset();
-    }
-
-    if (bpk_alloc_helper_ != nullptr) {
-      delete bpk_alloc_helper_;
-      bpk_alloc_helper_ = nullptr;
     }
   }
 

@@ -272,6 +272,8 @@ struct PerfContextBase {
   uint64_t decrypt_data_nanos;
 
   uint64_t number_async_seek;
+
+  uint64_t num_skipped_times;
 };
 
 struct PerfContext : public PerfContextBase {

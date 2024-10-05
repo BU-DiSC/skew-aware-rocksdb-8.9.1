@@ -2233,7 +2233,8 @@ VersionStorageInfo::VersionStorageInfo(
       finalized_(false),
       force_consistency_checks_(_force_consistency_checks),
       epoch_number_requirement_(epoch_number_requirement),
-      offpeak_time_option_(std::move(offpeak_time_option)) {
+      offpeak_time_option_(std::move(offpeak_time_option)),
+      current_total_filter_size_(0) {
   if (ref_vstorage != nullptr) {
     accumulated_num_point_reads_.store(
         ref_vstorage->accumulated_num_point_reads_.load(
@@ -2266,6 +2267,7 @@ VersionStorageInfo::VersionStorageInfo(
     current_num_deletions_ = ref_vstorage->current_num_deletions_;
     current_num_samples_ = ref_vstorage->current_num_samples_;
     oldest_snapshot_seqnum_ = ref_vstorage->oldest_snapshot_seqnum_;
+    current_total_filter_size_ = ref_vstorage->current_total_filter_size_;
     compact_cursor_ = ref_vstorage->compact_cursor_;
     compact_cursor_.resize(num_levels_);
   }
@@ -2317,7 +2319,7 @@ Version::Version(ColumnFamilyData* column_family_data, VersionSet* vset,
     use_async_io_ = true;
   }
 
-  max_modulars_in_cache_ = 0;
+  max_modulars_in_cache_shrunk_by_entry_size_ = 0;
   data_block_size_ = 1;
   overall_bits_per_key_ = 0.0;
   max_bits_per_key_granularity_ = 0.0;
@@ -2338,11 +2340,10 @@ Version::Version(ColumnFamilyData* column_family_data, VersionSet* vset,
         }
         max_bits_per_key_granularity_ = tbo.max_bits_per_key_granularity;
         if (tbo.block_cache) {
-          uint32_t num_entries_per_file =
-              mutable_cf_options_.target_file_size_base / tbo.block_size;
-          max_modulars_in_cache_ =
+          max_modulars_in_cache_shrunk_by_entry_size_ =
               tbo.block_cache->GetCapacity() /
-              (num_entries_per_file * max_bits_per_key_granularity_);
+              (mutable_cf_options_.target_file_size_base *
+               max_bits_per_key_granularity_ / 8);
         }
         data_block_size_ = tbo.block_size;
         max_modulars_ = tbo.max_modulars;
@@ -2580,6 +2581,10 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
     }
     if (get_context.sample()) {
       sample_file_read_inc(f->file_metadata);
+    }
+    if (f->file_metadata->stats.start_global_point_read_number == 0) {
+      f->file_metadata->stats.start_global_point_read_number =
+          storage_info_.GetAccumulatedNumPointReads();
     }
 
     bool is_evicted_point_read_existing = false;
@@ -3259,8 +3264,6 @@ Status Version::MultiGetAsync(
 bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
                               const FileMetaData* meta,
                               uint8_t* max_accessed_modulars) {
-  // read no modules by default
-  if (max_accessed_modulars) *max_accessed_modulars = 0;
   // Reaching the bottom level implies misses at all upper levels, so we'll
   // skip checking the filters when we predict a hit.
   bool result = cfd_->ioptions()->optimize_filters_for_hits &&
@@ -3281,22 +3284,50 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
   }
 
   if (storage_info_.GetBitsPerKeyAllocationType() ==
-      BitsPerKeyAllocationType::kDynamicMonkeyBpkAlloc) {
+      BitsPerKeyAllocationType::kNaiveMonkeyBpkAlloc) {
+    if (max_accessed_modulars) *max_accessed_modulars = max_modulars_;
+    return false;
+  } else if (storage_info_.GetBitsPerKeyAllocationType() ==
+             BitsPerKeyAllocationType::kDynamicMonkeyBpkAlloc) {
     if (max_accessed_modulars) *max_accessed_modulars = max_modulars_;
     return storage_info_.IsFilterSkippedWithEmptyBpkInDynamicMonkey(level);
   } else if (storage_info_.GetBitsPerKeyAllocationType() ==
              BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc) {
+    *max_accessed_modulars = 0;
+    uint64_t current_global_point_read_number =
+        storage_info_.GetAccumulatedNumPointReads();
+    uint64_t origin_num_point_reads =
+        std::min(meta->stats.num_point_reads.load(std::memory_order_relaxed),
+                 current_global_point_read_number);
+    size_t estimated_interval = meta->stats.GetEstimatedInterval(
+        origin_num_point_reads, current_global_point_read_number,
+        cfd_->ioptions()->point_read_learning_rate);
     std::pair<uint64_t, uint64_t> num_point_read_stats =
         meta->stats.GetEstimatedNumPointReads(
-            storage_info_.GetAccumulatedNumPointReads(),
-            cfd_->ioptions()->point_read_learning_rate);
+            current_global_point_read_number,
+            cfd_->ioptions()->point_read_learning_rate, estimated_interval);
     uint64_t num_point_reads = num_point_read_stats.first;
     uint64_t num_existing_point_reads = num_point_read_stats.second;
-    if (num_point_reads == 0) {
-      meta->stats.start_global_point_read_number =
-          storage_info_.GetAccumulatedNumPointReads();
+    if (origin_num_point_reads == 0 || num_point_reads == 0) {
       // first time read a file, only read the first module
-      if (max_accessed_modulars) *max_accessed_modulars = 1;
+      if (max_accessed_modulars) {
+        if (meta->bpk != -1) {
+          *max_accessed_modulars = 1;
+        } else {
+          *max_accessed_modulars =
+              (uint8_t)ceil(meta->bpk / max_bits_per_key_granularity_);
+        }
+      }
+      return false;
+    }
+    if (current_global_point_read_number <= origin_num_point_reads) {
+      if (meta->bpk != -1) {
+        *max_accessed_modulars = max_modulars_;
+        ;
+      } else {
+        *max_accessed_modulars =
+            (uint8_t)ceil(meta->bpk / max_bits_per_key_granularity_);
+      }
       return false;
     }
     if (num_point_reads <= num_existing_point_reads ||
@@ -3321,40 +3352,57 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
     // skip this filter if no bpk should be assigned
     if (result || max_accessed_modulars == NULL) return result;
     *max_accessed_modulars = max_modulars_;
-    /*
-    size_t filter_size = 0;
-    double bpk = 0.0;
-    double last_fpr = 1.0;
-    double fpr = 0.0;
-    if (meta->bpk == -1) {
-      bpk = overall_bits_per_key_;
-    } else {
-      bpk = std::min(meta->bpk, max_bits_per_key_granularity_);
-    }
-    filter_size = bpk*(meta->num_entries - meta->num_range_deletions)/8;
-    fpr = std::exp(-1.0 * bpk * log_2_squared);
+    return false;
+    // size_t filter_size = 0;
+    // double bpk = 0.0;
+    // double last_fpr = 1.0;
+    // double fpr = 0.0;
+    // double current_total_bpk = meta->bpk;
+    // if (meta->bpk == -1) {
+    //   bpk = overall_bits_per_key_;
+    //   current_total_bpk = overall_bits_per_key_;
+    // } else {
+    //   bpk = std::min(meta->bpk, max_bits_per_key_granularity_);
+    // }
+    // filter_size = bpk*(meta->num_entries - meta->num_range_deletions)/8;
+    // fpr = std::exp(-1.0 * bpk * log_2_squared);
 
-    double expected_accesses = 0.0;
-    while (true) {
-      expected_accesses = num_empty_point_reads*last_fpr +
-    num_existing_point_reads;
-      if(std::log(filter_size*1.0/data_block_size_*expected_accesses/((1.0 -
-    fpr)*num_empty_point_reads*last_fpr)) < -std::log(1.0 -
-    expected_accesses*1.0/storage_info_.GetAccumulatedNumPointReads())*max_modulars_in_cache_
-    - 1) {
-        (*max_accessed_modulars)++;
-        result = false;
-        last_fpr *= fpr;
-        if (bpk <= max_bits_per_key_granularity_) return result;
-        bpk -= max_bits_per_key_granularity_;
-        fpr = std::exp(-1.0 * bpk * log_2_squared);
-        filter_size = bpk*(meta->num_entries - meta->num_range_deletions)/8;
-      } else {
-        if (*max_accessed_modulars == 0) result = true;
-        break;
-      }
-    }
-    return result;*/
+    // double expected_accesses = 0.0;
+    // double entry_size = (meta->raw_key_size + meta->raw_value_size) /
+    // (meta->num_entries - meta->num_range_deletions);
+
+    // // populate max_accessed_modulars (always not skipping filters)
+    // while (true) {
+    //   expected_accesses = num_empty_point_reads*last_fpr +
+    // num_existing_point_reads;
+    //   if(std::log(filter_size*1.0/data_block_size_*expected_accesses/((1.0 -
+    // fpr)*num_empty_point_reads*last_fpr)) < -std::log(1.0 -
+    // num_point_reads*1.0/current_global_point_read_number)*(max_modulars_in_cache_shrunk_by_entry_size_
+    // * entry_size)
+    // - 1) {
+    //     (*max_accessed_modulars)++;
+    //     last_fpr *= fpr;
+    //     if (current_total_bpk <= max_bits_per_key_granularity_) {
+    //       return false;
+    //     }
+    //     current_total_bpk -= max_bits_per_key_granularity_;
+    //     if (current_total_bpk < max_bits_per_key_granularity_) {
+    //       fpr = std::exp(-1.0 * current_total_bpk * log_2_squared);
+    //       filter_size = current_total_bpk*(meta->num_entries -
+    //       meta->num_range_deletions)/8;
+    //     } else {
+    //       fpr = std::exp(-1.0 *  max_bits_per_key_granularity_ *
+    //       log_2_squared); filter_size =
+    //       max_bits_per_key_granularity_*(meta->num_entries -
+    //       meta->num_range_deletions)/8;
+    //     }
+    //   } else {
+    //     PERF_COUNTER_ADD(num_skipped_times,
+    //     (uint8_t)ceil(meta->bpk/max_bits_per_key_granularity_) -
+    //     *max_accessed_modulars);
+    //     break;
+    //   }
+    // }
   }
   return false;
 }
@@ -3418,6 +3466,7 @@ bool Version::MaybeInitializeFileMetaData(const ReadOptions& read_options,
   file_meta->raw_value_size = tp->raw_value_size;
   file_meta->raw_key_size = tp->raw_key_size;
   file_meta->num_range_deletions = tp->num_range_deletions;
+  file_meta->filter_size = tp->filter_size;
   return true;
 }
 
@@ -3437,6 +3486,7 @@ void VersionStorageInfo::UpdateAccumulatedStats(FileMetaData* file_meta) {
       file_meta->num_entries - file_meta->num_deletions;
   current_num_deletions_ += file_meta->num_deletions;
   current_num_samples_++;
+  current_total_filter_size_ += file_meta->filter_size;
 }
 
 void VersionStorageInfo::RemoveCurrentStats(FileMetaData* file_meta) {
@@ -3445,6 +3495,9 @@ void VersionStorageInfo::RemoveCurrentStats(FileMetaData* file_meta) {
         file_meta->num_entries - file_meta->num_deletions;
     current_num_deletions_ -= file_meta->num_deletions;
     current_num_samples_--;
+    if (current_total_filter_size_ >= file_meta->filter_size) {
+      current_total_filter_size_ -= file_meta->filter_size;
+    }
   }
 }
 
@@ -7673,10 +7726,10 @@ InternalIterator* VersionSet::MakeInputIterator(
                        (meta_for_file_with_smallest_key->num_entries -
                         meta_for_file_with_smallest_key->num_range_deletions));
   } else {
-    level_iter_with_smallest_key->SetAdjustedAvgNumPointQueriesForLeftmostFile(
+    /*level_iter_with_smallest_key->SetAdjustedAvgNumPointQueriesForLeftmostFile(
         num_non_existing_point_reads_for_file_with_smallest_key * 1.0 /
         (meta_for_file_with_smallest_key->num_entries -
-         meta_for_file_with_smallest_key->num_range_deletions));
+         meta_for_file_with_smallest_key->num_range_deletions));*/
     stats_log +=
         " adjusting file (level iter) with smallest key: " +
         std::to_string(meta_for_file_with_smallest_key->fd.GetNumber()) +
@@ -7702,10 +7755,10 @@ InternalIterator* VersionSet::MakeInputIterator(
                        (meta_for_file_with_largest_key->num_entries -
                         meta_for_file_with_largest_key->num_range_deletions));
   } else {
-    level_iter_with_largest_key->SetAdjustedAvgNumPointQueriesForRightmostFile(
+    /*level_iter_with_largest_key->SetAdjustedAvgNumPointQueriesForRightmostFile(
         num_non_existing_point_reads_for_file_with_largest_key * 1.0 /
         (meta_for_file_with_largest_key->num_entries -
-         meta_for_file_with_largest_key->num_range_deletions));
+         meta_for_file_with_largest_key->num_range_deletions));*/
     stats_log +=
         " adjusting file (level iter) with largestkey: " +
         std::to_string(meta_for_file_with_largest_key->fd.GetNumber()) +

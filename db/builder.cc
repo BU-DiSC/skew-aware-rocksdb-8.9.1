@@ -316,7 +316,7 @@ Status BuildTable(
               : meta->oldest_ancester_time);
       meta->num_entries = *num_input_entries;
       meta->num_range_deletions = num_unfragmented_tombstones;
-
+      bpk_alloc_helper.PrepareBpkAllocation();
       if (version) {
         uint64_t temp_num_point_reads = round(agg_num_point_reads);
         if (ioptions.point_reads_track_method == kDynamicCompactionAwareTrack) {
@@ -337,13 +337,12 @@ Status BuildTable(
             // number of point queries (only used for bits-per-key reallocation)
             // because we num_point_reads in Lvl0 files is mostly used as a
             // tracked number of point reads instead of the estimated number
-            temp_num_point_reads = std::max(
-                round(
-                    meta->stats.start_global_point_read_number *
-                    version->storage_info()->GetAvgNumPointReadsPerLvl0File()),
-                // temp_num_point_reads =
-                // std::max(round(meta->stats.start_global_point_read_number*1.0),
-                round(agg_num_point_reads));
+            temp_num_point_reads = round(
+                meta->stats.start_global_point_read_number *
+                    version->storage_info()->GetAvgNumPointReadsPerLvl0File() +
+                agg_num_point_reads);
+            // temp_num_point_reads =
+            // std::max(round(meta->stats.start_global_point_read_number*1.0),
           }
         }
         meta->stats.num_point_reads.store(temp_num_point_reads);
@@ -353,9 +352,10 @@ Status BuildTable(
                     agg_num_point_reads),
               agg_num_existing_point_reads));
         }
-        bpk_alloc_helper.PrepareBpkAllocation();
+        meta->bpk = bpk_alloc_helper.overall_bits_per_key_;
         double new_bits_per_key = 0.0;
-        if (bpk_alloc_helper.IfNeedAllocateBitsPerKey(*meta, *num_input_entries,
+        if (!bpk_alloc_helper.no_filter_optimize_for_level0_ &&
+            bpk_alloc_helper.IfNeedAllocateBitsPerKey(*meta, *num_input_entries,
                                                       &new_bits_per_key)) {
           builder->ResetFilterBitsPerKey(new_bits_per_key);
           meta->bpk = new_bits_per_key;
@@ -400,6 +400,7 @@ Status BuildTable(
       assert(meta->fd.GetFileSize() > 0);
       tp = builder
                ->GetTableProperties();  // refresh now that builder is finished
+      meta->filter_size = tp.filter_size;
       if (memtable_payload_bytes != nullptr &&
           memtable_garbage_bytes != nullptr) {
         const CompactionIterationStats& ci_stats = c_iter.iter_stats();

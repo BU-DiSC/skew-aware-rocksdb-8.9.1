@@ -708,6 +708,14 @@ class VersionStorageInfo {
     return point_reads_num_when_last_flush_;
   }
 
+  uint64_t GetCurrentTotalFilterSize() const {
+    return current_total_filter_size_;
+  }
+
+  uint64_t GetCurrentTotalNumEntries() const {
+    return current_num_deletions_ + current_num_non_deletions_;
+  }
+
   uint64_t GetNumFlushes() const { return num_flushes_; }
 
  private:
@@ -883,6 +891,8 @@ class VersionStorageInfo {
   EpochNumberRequirement epoch_number_requirement_;
 
   OffpeakTimeOption offpeak_time_option_;
+
+  uint64_t current_total_filter_size_;
 
   friend class Version;
   friend class VersionSet;
@@ -1226,7 +1236,7 @@ class Version {
   // for modular filter skipping
   double overall_bits_per_key_;
   double max_bits_per_key_granularity_;
-  uint64_t max_modulars_in_cache_;
+  uint64_t max_modulars_in_cache_shrunk_by_entry_size_;
   size_t data_block_size_;
   uint32_t max_modulars_;
 

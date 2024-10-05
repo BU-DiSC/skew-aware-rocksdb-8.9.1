@@ -17,6 +17,8 @@ class BitsPerKeyAllocHelper {
                                  const VersionStorageInfo* vstorage)
       : ioptions_(immutable_options), vstorage_(vstorage) {
     bpk_optimization_prepared_flag_ = false;
+    num_bits_for_filter_to_be_removed_ = 0;
+    num_entries_in_compaction_ = 0;
   }
 
   // Prepare bpk optimizations (calculate the temporary sum and the common
@@ -35,6 +37,7 @@ class BitsPerKeyAllocHelper {
   bool flush_flag_ = false;
   double naive_monkey_bpk = 0.0;
   bool bpk_optimization_prepared_flag_ = false;
+  bool no_filter_optimize_for_level0_ = false;
   double workload_aware_bpk_weight_threshold_ =
       std::numeric_limits<double>::max();
   uint64_t dynamic_monkey_bpk_num_entries_threshold_ =
@@ -46,6 +49,10 @@ class BitsPerKeyAllocHelper {
   double common_constant_in_bpk_optimization_ = 0;
   uint64_t total_empty_queries_ = 0;
   double total_bits_for_filter_ = 0.0;
+
+  double overall_bits_per_key_ = 0.0;
+  uint64_t num_entries_in_compaction_ = 0;
+  uint64_t num_bits_for_filter_to_be_removed_ = 0;
   struct LevelState {
     int level;
     uint64_t num_entries;

@@ -220,10 +220,54 @@ struct FileSampledStats {
     }
   }
 
+  size_t GetEstimatedInterval(uint64_t origin_num_point_reads,
+                              uint64_t current_global_point_read_number,
+                              double learning_rate) const {
+    if (global_point_read_number_window.size() > 0) {
+      if (current_global_point_read_number >
+              global_point_read_number_window.front() &&
+          global_point_read_number_window.front() >
+              start_global_point_read_number) {
+        return round((current_global_point_read_number -
+                      global_point_read_number_window.front()) *
+                         learning_rate /
+                         global_point_read_number_window.size() +
+                     (1.0 - learning_rate) *
+                         (global_point_read_number_window.front() -
+                          start_global_point_read_number) /
+                         origin_num_point_reads);
+      }
+
+      if (current_global_point_read_number >
+          global_point_read_number_window.front()) {
+        return round((current_global_point_read_number -
+                      global_point_read_number_window.front()) *
+                     1.0 / global_point_read_number_window.size());
+      }
+
+      if (global_point_read_number_window.front() >
+          start_global_point_read_number) {
+        return round((global_point_read_number_window.front() -
+                      start_global_point_read_number) *
+                     1.0 / origin_num_point_reads);
+      }
+    }
+
+    if (current_global_point_read_number > start_global_point_read_number &&
+        start_global_point_read_number != 0) {
+      return round(
+          (current_global_point_read_number - start_global_point_read_number) *
+          1.0 / origin_num_point_reads);
+    }
+
+    return 0;
+  }
+
   // return <the estimated number of point queries, the estimated number of
   // existing point queries>
   std::pair<uint64_t, uint64_t> GetEstimatedNumPointReads(
-      uint64_t current_global_point_read_number, double learning_rate) const {
+      uint64_t current_global_point_read_number, double learning_rate,
+      int est_interval = -1) const {
     uint64_t est_num_point_reads = 0;
     uint64_t origin_num_point_reads =
         num_point_reads.load(std::memory_order_relaxed);
@@ -231,44 +275,54 @@ struct FileSampledStats {
         num_existing_point_reads.load(std::memory_order_relaxed);
     est_num_point_reads =
         origin_num_point_reads + global_point_read_number_window.size();
-    if (global_point_read_number_window.size() > 0) {
-      if (current_global_point_read_number >
-              global_point_read_number_window.front() &&
-          global_point_read_number_window.front() >
-              start_global_point_read_number) {
-        est_num_point_reads =
-            (round)(current_global_point_read_number * 1.0 /
-                    ((current_global_point_read_number -
-                      global_point_read_number_window.front()) *
-                         learning_rate /
-                         global_point_read_number_window.size() +
-                     (1.0 - learning_rate) *
-                         (global_point_read_number_window.front() -
-                          start_global_point_read_number) /
-                         origin_num_point_reads));
-      } else if (current_global_point_read_number >
-                 global_point_read_number_window.front()) {
-        est_num_point_reads =
-            (round)(current_global_point_read_number * 1.0 *
-                    global_point_read_number_window.size() /
-                    (current_global_point_read_number -
-                     global_point_read_number_window.front()));
-      } else if (global_point_read_number_window.front() >
-                 start_global_point_read_number) {
-        est_num_point_reads = (round)(current_global_point_read_number * 1.0 *
-                                      origin_num_point_reads /
-                                      (global_point_read_number_window.front() -
-                                       start_global_point_read_number));
-      }
-    } else if (current_global_point_read_number >
-                   start_global_point_read_number &&
-               start_global_point_read_number != 0) {
-      est_num_point_reads = (round)(current_global_point_read_number * 1.0 /
-                                    (current_global_point_read_number -
-                                     start_global_point_read_number) *
-                                    origin_num_point_reads);
+    if (est_interval == -1) {
+      est_interval =
+          GetEstimatedInterval(origin_num_point_reads,
+                               current_global_point_read_number, learning_rate);
     }
-
+    // if (global_point_read_number_window.size() > 0) {
+    //   if (current_global_point_read_number >
+    //           global_point_read_number_window.front() &&
+    //       global_point_read_number_window.front() >
+    //           start_global_point_read_number) {
+    //     est_num_point_reads =
+    //         (round)(current_global_point_read_number * 1.0 /
+    //                 ((current_global_point_read_number -
+    //                   global_point_read_number_window.front()) *
+    //                      learning_rate /
+    //                      global_point_read_number_window.size() +
+    //                  (1.0 - learning_rate) *
+    //                      (global_point_read_number_window.front() -
+    //                       start_global_point_read_number) /
+    //                      origin_num_point_reads));
+    //   } else if (current_global_point_read_number >
+    //              global_point_read_number_window.front()) {
+    //     est_num_point_reads =
+    //         (round)(current_global_point_read_number * 1.0 *
+    //                 global_point_read_number_window.size() /
+    //                 (current_global_point_read_number -
+    //                  global_point_read_number_window.front()));
+    //   } else if (global_point_read_number_window.front() >
+    //              start_global_point_read_number) {
+    //     est_num_point_reads = (round)(current_global_point_read_number * 1.0
+    //     *
+    //                                   origin_num_point_reads /
+    //                                   (global_point_read_number_window.front()
+    //                                   -
+    //                                    start_global_point_read_number));
+    //   }
+    // } else if (current_global_point_read_number >
+    //                start_global_point_read_number &&
+    //            start_global_point_read_number != 0) {
+    //   est_num_point_reads = (round)(current_global_point_read_number * 1.0 /
+    //                                 (current_global_point_read_number -
+    //                                  start_global_point_read_number) *
+    //                                 origin_num_point_reads);
+    // }
+    if (est_interval != 0) {
+      est_num_point_reads =
+          (round)(current_global_point_read_number * 1.0 / est_interval);
+    }
     double est_existing_ratio = 0.0;
     uint64_t num_existing_point_reads_in_window = 0;
     if (global_point_read_number_window.size() == 64) {
@@ -378,6 +432,9 @@ struct FileMetaData {
   // Size of the "tail" part of a SST file
   // "Tail" refers to all blocks after data blocks till the end of the SST file
   uint64_t tail_size = 0;
+
+  // Size of the filter part in the tail
+  uint64_t filter_size = 0;
 
   // Value of the `AdvancedColumnFamilyOptions.persist_user_defined_timestamps`
   // flag when the file is created. Default to true, only when this flag is
@@ -626,13 +683,15 @@ class VersionEdit {
                      file_checksum_func_name, unique_id,
                      compensated_range_deletion_size, tail_size,
                      user_defined_timestamps_persisted));
-    if (num_point_reads != 0 || num_existing_point_reads != 0) {
+    if (num_point_reads != 0) {
       new_files_.back().second.stats.num_point_reads.store(num_point_reads);
+      new_files_.back().second.stats.start_global_point_read_number =
+          start_global_point_read_number;
+    }
+    if (num_existing_point_reads != 0) {
       new_files_.back().second.stats.num_existing_point_reads.store(
           num_existing_point_reads);
     }
-    new_files_.back().second.stats.start_global_point_read_number =
-        start_global_point_read_number;
     files_to_quarantine_.push_back(file);
     if (!HasLastSequence() || largest_seqno > GetLastSequence()) {
       SetLastSequence(largest_seqno);

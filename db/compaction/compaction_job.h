@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "db/blob/blob_file_completion_callback.h"
+#include "db/bpk_alloc_helper.h"
 #include "db/column_family.h"
 #include "db/compaction/compaction_iterator.h"
 #include "db/compaction/compaction_outputs.h"
@@ -369,6 +370,8 @@ class CompactionJob {
   // The Compaction Read and Write priorities are the same for different
   // scenarios, such as write stalled.
   Env::IOPriority GetRateLimiterPriority();
+
+  BitsPerKeyAllocHelper* bpk_alloc_helper_ = nullptr;
 };
 
 // CompactionServiceInput is used the pass compaction information between two

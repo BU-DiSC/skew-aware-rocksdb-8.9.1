@@ -2347,18 +2347,23 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
   TEST_SYNC_POINT("BlockBasedTable::Get:BeforeFilterMatch");
 
   bool may_match = true;
+  bool tmp_no_io = no_io;
   HashDigest origin_hash_digest = get_context->hash_digest_;
   while (true) {
+    if (!tmp_no_io &&
+        modular_filter_index >= get_context->max_accessed_modulars_) {
+      tmp_no_io = true;
+    }
     may_match = FullFilterKeyMayMatch(filter, key, no_io, prefix_extractor,
                                       get_context, &lookup_context,
                                       read_options, modular_filter_index);
     if (!use_origin_filter && !skip_filters && may_match &&
-        modular_filter_index + 1 < rep_->modular_filter->size() &&
-        modular_filter_index + 1 < get_context->max_accessed_modulars_) {
+        modular_filter_index + 1 < rep_->modular_filter->size()) {
       modular_filter_index++;
       get_context->hash_digest_ =
           NextHashDigest(origin_hash_digest, modular_filter_index);
-      get_context->filter_second_high_priority_cache_ = true;
+      get_context->filter_second_high_priority_cache_ =
+          modular_filter_index >= get_context->max_accessed_modulars_;
       filter = rep_->modular_filter->at(modular_filter_index).get();
     } else {
       break;

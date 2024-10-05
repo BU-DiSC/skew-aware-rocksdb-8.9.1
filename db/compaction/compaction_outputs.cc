@@ -39,10 +39,14 @@ Status CompactionOutputs::Finish(
                                           meta->oldest_ancester_time);
     if (compaction_->immutable_options()->point_reads_track_method ==
         kDynamicCompactionAwareTrack) {
-      file_point_read_inc(
-          meta, (uint64_t)round(current_output().agg_num_point_reads));
+      uint64_t num_point_reads =
+          std::min(compaction_->input_vstorage()->GetAccumulatedNumPointReads(),
+                   (uint64_t)round(current_output().agg_num_point_reads));
+      file_point_read_inc(meta, num_point_reads);
       file_existing_point_read_inc(
-          meta, (uint64_t)round(current_output().agg_num_existing_point_reads));
+          meta, std::min(num_point_reads,
+                         (uint64_t)round(
+                             current_output().agg_num_existing_point_reads)));
     } else if (compaction_->immutable_options()->point_reads_track_method ==
                kNaiiveTrack) {
       file_point_read_inc(meta,
@@ -50,17 +54,15 @@ Status CompactionOutputs::Finish(
       file_existing_point_read_inc(
           meta, compaction_->GetAvgNumExistingPointReadsWithNaiiveTrack());
     }
-
-    double new_bits_per_key = 0.0;
-    if (bpk_alloc_helper_ == nullptr) {
-      bpk_alloc_helper_ = new BitsPerKeyAllocHelper(
-          compaction_->immutable_options(), compaction_->input_vstorage());
-    }
-    bpk_alloc_helper_->PrepareBpkAllocation(compaction_);
     meta->num_entries = builder_->NumEntries();
-    bool reset_flag = bpk_alloc_helper_->IfNeedAllocateBitsPerKey(
-        *meta, compaction_->max_num_entries_in_output_level(),
-        &new_bits_per_key);
+    double new_bits_per_key = 0.0;
+    bool reset_flag = false;
+    if (bpk_alloc_helper_ != nullptr) {
+      reset_flag = bpk_alloc_helper_->IfNeedAllocateBitsPerKey(
+          *meta, compaction_->max_num_entries_in_output_level(),
+          &new_bits_per_key);
+    }
+
     if (reset_flag) {
       builder_->ResetFilterBitsPerKey(new_bits_per_key);
       meta->bpk = new_bits_per_key;
@@ -75,9 +77,6 @@ Status CompactionOutputs::Finish(
           meta->stats.num_existing_point_reads.load(std::memory_order_relaxed),
           new_bits_per_key);
     }
-    compaction_->input_vstorage()->SetBpkCommonConstant(
-        bpk_alloc_helper_->bpk_alloc_type_,
-        bpk_alloc_helper_->common_constant_in_bpk_optimization_);
 
     s = builder_->Finish();
 
@@ -97,6 +96,7 @@ Status CompactionOutputs::Finish(
     meta->marked_for_compaction = builder_->NeedCompact();
     meta->user_defined_timestamps_persisted = static_cast<bool>(
         builder_->GetTableProperties().user_defined_timestamps_persisted);
+    meta->filter_size = builder_->GetTableProperties().filter_size;
   }
   current_output().finished = true;
   stats_.bytes_written += current_bytes;
@@ -843,9 +843,6 @@ CompactionOutputs::CompactionOutputs(const Compaction* compaction,
   }
 
   level_ptrs_ = std::vector<size_t>(compaction_->number_levels(), 0);
-
-  bpk_alloc_helper_ = new BitsPerKeyAllocHelper(
-      compaction_->immutable_options(), compaction_->input_vstorage());
 }
 
 }  // namespace ROCKSDB_NAMESPACE
