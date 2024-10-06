@@ -3302,10 +3302,17 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
     size_t estimated_interval = meta->stats.GetEstimatedInterval(
         origin_num_point_reads, current_global_point_read_number,
         cfd_->ioptions()->point_read_learning_rate);
+    uint64_t min_num_point_reads = 0;
+    if (level == 0) {
+      min_num_point_reads =
+          round(meta->stats.start_global_point_read_number *
+                storage_info_.GetAvgNumPointReadsPerLvl0File());
+    }
     std::pair<uint64_t, uint64_t> num_point_read_stats =
         meta->stats.GetEstimatedNumPointReads(
             current_global_point_read_number,
-            cfd_->ioptions()->point_read_learning_rate, estimated_interval);
+            cfd_->ioptions()->point_read_learning_rate, estimated_interval,
+            min_num_point_reads);
     uint64_t num_point_reads = num_point_read_stats.first;
     uint64_t num_existing_point_reads = num_point_read_stats.second;
     if (origin_num_point_reads == 0 || num_point_reads == 0) {
@@ -7393,12 +7400,15 @@ InternalIterator* VersionSet::MakeInputIterator(
               c->mutable_cf_options()->block_protection_bytes_per_key,
               /*range_del_read_seqno=*/nullptr,
               /*range_del_iter=*/&range_tombstone_iter,
-              current_global_point_reads_counter);
+              current_global_point_reads_counter,
+              c->input_vstorage()->GetAvgNumPointReadsPerLvl0File());
 
           temp_estimated_num_point_read_stats =
               fmd.stats.GetEstimatedNumPointReads(
                   current_global_point_reads_counter,
-                  db_options_->point_read_learning_rate);
+                  db_options_->point_read_learning_rate, -1,
+                  round(fmd.stats.start_global_point_read_number *
+                        c->input_vstorage()->GetAvgNumPointReadsPerLvl0File()));
           stats_log +=
               "[ fileID:" + std::to_string(fmd.fd.GetNumber()) +
               ", num_point_reads:" +

@@ -267,7 +267,7 @@ struct FileSampledStats {
   // existing point queries>
   std::pair<uint64_t, uint64_t> GetEstimatedNumPointReads(
       uint64_t current_global_point_read_number, double learning_rate,
-      int est_interval = -1) const {
+      int est_interval = -1, uint64_t min_num_point_reads = 0) const {
     uint64_t est_num_point_reads = 0;
     uint64_t origin_num_point_reads =
         num_point_reads.load(std::memory_order_relaxed);
@@ -323,6 +323,8 @@ struct FileSampledStats {
       est_num_point_reads =
           (round)(current_global_point_read_number * 1.0 / est_interval);
     }
+    est_num_point_reads =
+        std::max(est_num_point_reads, min_num_point_reads + GetNumPointReads());
     double est_existing_ratio = 0.0;
     uint64_t num_existing_point_reads_in_window = 0;
     if (global_point_read_number_window.size() == 64) {

@@ -102,7 +102,8 @@ class TableCache {
       uint8_t protection_bytes_per_key,
       const SequenceNumber* range_del_read_seqno = nullptr,
       TruncatedRangeDelIterator** range_del_iter = nullptr,
-      uint64_t current_global_num_point_reads_counter = 0);
+      uint64_t current_global_num_point_reads_counter = 0,
+      double avg_lvl0_num_point_reads_ratio = 1.0);
 
   // If a seek to internal key "k" in specified file finds an entry,
   // call get_context->SaveValue() repeatedly until

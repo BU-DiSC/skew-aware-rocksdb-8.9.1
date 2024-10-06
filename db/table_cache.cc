@@ -226,7 +226,8 @@ InternalIterator* TableCache::NewIterator(
     const InternalKey* largest_compaction_key, bool allow_unprepared_value,
     uint8_t block_protection_bytes_per_key, const SequenceNumber* read_seqno,
     TruncatedRangeDelIterator** range_del_iter,
-    uint64_t current_global_num_point_reads_counter) {
+    uint64_t current_global_num_point_reads_counter,
+    double avg_lvl0_num_point_reads_ratio) {
   PERF_TIMER_GUARD(new_table_iterator_nanos);
 
   Status s;
@@ -269,10 +270,16 @@ InternalIterator* TableCache::NewIterator(
           file_meta.num_entries - file_meta.num_range_deletions;
       if (num_entries_in_filter > 0 && (ioptions_.point_reads_track_method ==
                                         kDynamicCompactionAwareTrack)) {
+        uint64_t min_num_point_reads = 0;
+        if (level == 0) {
+          min_num_point_reads =
+              round(file_meta.stats.start_global_point_read_number *
+                    avg_lvl0_num_point_reads_ratio);
+        }
         std::pair<uint64_t, uint64_t> estimated_num_point_read_stats =
             file_meta.stats.GetEstimatedNumPointReads(
                 current_global_num_point_reads_counter,
-                ioptions_.point_read_learning_rate);
+                ioptions_.point_read_learning_rate, -1, min_num_point_reads);
         uint64_t num_point_reads = estimated_num_point_read_stats.first;
         uint64_t num_existing_point_reads =
             estimated_num_point_read_stats.second;

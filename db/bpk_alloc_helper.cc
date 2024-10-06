@@ -257,11 +257,17 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
           tmp_num_point_reads = level2num_point_reads[level];
         }
         uint64_t num_entries_in_bf;
+        uint64_t min_num_point_reads = 0;
         for (const FileMetaData* meta : input_files->at(i).files) {
+          if (i == 0) {
+            min_num_point_reads =
+                round(meta->stats.start_global_point_read_number *
+                      vstorage_->GetAvgNumPointReadsPerLvl0File());
+          }
           std::pair<uint64_t, uint64_t> est_num_point_reads =
               meta->stats.GetEstimatedNumPointReads(
                   vstorage_->GetAccumulatedNumPointReads(),
-                  ioptions_->point_read_learning_rate);
+                  ioptions_->point_read_learning_rate, -1, min_num_point_reads);
           fileID_in_compaction.insert(meta->fd.GetNumber());
           num_entries_in_bf = meta->num_entries - meta->num_range_deletions;
           num_entries_in_compaction_ += num_entries_in_bf;
@@ -308,10 +314,16 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
             fileID_in_compaction.find(file_meta->fd.GetNumber()) !=
                 fileID_in_compaction.end())
           continue;
+        uint64_t min_num_point_reads = 0;
+        if (level == 0) {
+          min_num_point_reads =
+              round(file_meta->stats.start_global_point_read_number *
+                    vstorage_->GetAvgNumPointReadsPerLvl0File());
+        }
         std::pair<uint64_t, uint64_t> est_num_point_reads =
             file_meta->stats.GetEstimatedNumPointReads(
                 vstorage_->GetAccumulatedNumPointReads(),
-                ioptions_->point_read_learning_rate);
+                ioptions_->point_read_learning_rate, -1, min_num_point_reads);
         num_point_reads = est_num_point_reads.first;
         num_existing_point_reads = est_num_point_reads.second;
         workload_aware_num_entries_ += tmp_num_entries_in_filter_by_file;
