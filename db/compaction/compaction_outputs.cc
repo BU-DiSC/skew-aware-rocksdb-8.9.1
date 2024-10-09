@@ -42,6 +42,8 @@ Status CompactionOutputs::Finish(
       uint64_t num_point_reads =
           std::min(compaction_->input_vstorage()->GetAccumulatedNumPointReads(),
                    (uint64_t)round(current_output().agg_num_point_reads));
+      num_point_reads =
+          std::max(compaction_->GetMinNumPointReads(), num_point_reads);
       file_point_read_inc(meta, num_point_reads);
       file_existing_point_read_inc(
           meta, std::min(num_point_reads,

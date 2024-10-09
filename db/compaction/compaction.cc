@@ -342,6 +342,7 @@ Compaction::Compaction(
               ? Compaction::kInvalidLevel
               : EvaluatePenultimateLevel(vstorage, immutable_options_,
                                          start_level_, output_level_)),
+      num_input_files_(0),
       avg_num_point_reads_with_naiive_track_(0),
       avg_num_existing_point_reads_with_naiive_track_(0) {
   MarkFilesBeingCompacted(true);
@@ -374,13 +375,24 @@ Compaction::Compaction(
     input_levels_.resize(num_input_levels());
     // calculate max_num_entries_in_output_levels used in monkey allocation
     max_num_entries_in_output_level_ = 0;
+    min_num_point_reads_ = std::numeric_limits<uint64_t>::max();
     for (size_t which = 0; which < num_input_levels(); which++) {
       DoGenerateLevelFilesBrief(&input_levels_[which], inputs_[which].files,
                                 &arena_);
+      num_input_files_ += inputs_[which].files.size();
+    }
+
+    for (size_t which = 0; which < num_input_levels(); which++) {
       if (inputs_[which].level != output_level_) {
         for (FileMetaData* meta : inputs_[which].files) {
           max_num_entries_in_output_level_ +=
               meta->num_entries - meta->num_range_deletions;
+          auto result = meta->stats.GetEstimatedNumPointReads(
+              vstorage->GetAccumulatedNumPointReads(),
+              immutable_options_.point_read_learning_rate);
+          min_num_point_reads_ =
+              std::min(min_num_point_reads_,
+                       (uint64_t)floor(result.first / num_input_files_));
         }
       }
     }
@@ -388,6 +400,10 @@ Compaction::Compaction(
          input_vstorage_->LevelFiles(output_level_)) {
       max_num_entries_in_output_level_ +=
           meta->num_entries - meta->num_range_deletions;
+      // auto result =
+      // meta->stats.GetEstimatedNumPointReads(vstorage->GetAccumulatedNumPointReads(),
+      // immutable_options_.point_read_learning_rate); min_num_point_reads_ =
+      // std::min(min_num_point_reads_, result.first);
     }
 
     if (immutable_options_.point_reads_track_method == kNaiiveTrack) {
