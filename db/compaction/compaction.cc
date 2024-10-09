@@ -400,10 +400,10 @@ Compaction::Compaction(
          input_vstorage_->LevelFiles(output_level_)) {
       max_num_entries_in_output_level_ +=
           meta->num_entries - meta->num_range_deletions;
-      // auto result =
-      // meta->stats.GetEstimatedNumPointReads(vstorage->GetAccumulatedNumPointReads(),
-      // immutable_options_.point_read_learning_rate); min_num_point_reads_ =
-      // std::min(min_num_point_reads_, result.first);
+      auto result = meta->stats.GetEstimatedNumPointReads(
+          vstorage->GetAccumulatedNumPointReads(),
+          immutable_options_.point_read_learning_rate);
+      min_num_point_reads_ = std::min(min_num_point_reads_, result.first);
     }
 
     if (immutable_options_.point_reads_track_method == kNaiiveTrack) {
