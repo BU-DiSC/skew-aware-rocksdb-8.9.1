@@ -364,6 +364,12 @@ Status BuildTable(
                          " with reset bits-per-key %.4f",
                          tboptions.column_family_name.c_str(),
                          meta->fd.GetNumber(), new_bits_per_key);
+        } else {
+          ROCKS_LOG_INFO(ioptions.info_log,
+                         "[%s] Flushes generates new file %" PRIu64
+                         " with no reset bits-per-key",
+                         tboptions.column_family_name.c_str(),
+                         meta->fd.GetNumber());
         }
         version->storage_info()->SetBpkCommonConstant(
             bpk_alloc_helper.bpk_alloc_type_,

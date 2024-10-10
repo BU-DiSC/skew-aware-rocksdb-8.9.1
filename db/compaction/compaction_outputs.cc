@@ -71,13 +71,25 @@ Status CompactionOutputs::Finish(
       ROCKS_LOG_INFO(
           compaction_->immutable_options()->info_log,
           "[%s] Compaction generates new file %" PRIu64
+          " in level %d"
           " (num_point_reads=%" PRIu64 ", num_existing_point_reads=%" PRIu64
           ") with reset bits-per-key %.4f",
           compaction_->column_family_data()->GetName().c_str(),
-          meta->fd.GetNumber(),
+          meta->fd.GetNumber(), compaction_->output_level(),
           meta->stats.num_point_reads.load(std::memory_order_relaxed),
           meta->stats.num_existing_point_reads.load(std::memory_order_relaxed),
           new_bits_per_key);
+    } else {
+      ROCKS_LOG_INFO(
+          compaction_->immutable_options()->info_log,
+          "[%s] Compaction generates new file %" PRIu64
+          " in level %d"
+          " (num_point_reads=%" PRIu64 ", num_existing_point_reads=%" PRIu64
+          ") with no reset bits-per-key",
+          compaction_->column_family_data()->GetName().c_str(),
+          meta->fd.GetNumber(), compaction_->output_level(),
+          meta->stats.num_point_reads.load(std::memory_order_relaxed),
+          meta->stats.num_existing_point_reads.load(std::memory_order_relaxed));
     }
 
     s = builder_->Finish();

@@ -23,6 +23,10 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
   const BlockBasedTableOptions tbo =
       std::static_pointer_cast<BlockBasedTableFactory>(ioptions_->table_factory)
           ->GetBlockBasedTableOptions();
+  if (tbo.modular_filters) {
+    max_bits_per_key_ =
+        tbo.max_modulars * tbo.max_bits_per_key_granularity + 1.0;
+  }
   if (tbo.filter_policy == nullptr) return;
   overall_bits_per_key_ =
       std::static_pointer_cast<const BloomLikeFilterPolicy>(tbo.filter_policy)
@@ -54,7 +58,7 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
         !flush_flag_) {  // skip the preparation phase for flush
       return;
     }
-
+    uint64_t skipped_filter_size = 0;
     std::unordered_map<LevelState, uint64_t, LevelState::HashFunction>
         level2removed_num_entries;
     uint64_t added_entries_in_max_level = 0;
@@ -70,9 +74,9 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
         }
         if (level != 0) {
           uint64_t num_entries = 0;
-          if (level2removed_num_entries.find(LevelState(level, 0, 0)) !=
+          if (level2removed_num_entries.find(LevelState(level, 0, 0, 0)) !=
               level2removed_num_entries.end()) {
-            num_entries = level2removed_num_entries[LevelState(level, 0, 0)];
+            num_entries = level2removed_num_entries[LevelState(level, 0, 0, 0)];
           }
           uint64_t num_entries_in_bf = 0;
           for (const FileMetaData* meta : input_files->at(i).files) {
@@ -80,8 +84,7 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
             num_entries += num_entries_in_bf;
             num_entries_in_compaction_ += num_entries_in_bf;
             if (meta->bpk != -1) {
-              num_bits_for_filter_to_be_removed_ +=
-                  num_entries_in_bf * meta->bpk;
+              num_bits_for_filter_to_be_removed_ += meta->filter_size * 8;
             } else {
               num_bits_for_filter_to_be_removed_ +=
                   num_entries_in_bf * overall_bits_per_key_;
@@ -125,13 +128,16 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
     if (tbo.no_filter_optimize_for_level0) {
       start_level = 1;
     }
+    uint64_t agg_filter_size = 0;
     for (int level = start_level; level < vstorage_->num_levels(); ++level) {
       num_entries_in_filter_by_level = 0;
+      agg_filter_size = 0;
       for (auto* file_meta : vstorage_->LevelFiles(level)) {
         tmp_num_entries_in_filter_by_file =
             file_meta->num_entries - file_meta->num_range_deletions;
         tmp_fd_number = file_meta->fd.GetNumber();
         max_fd_number = std::max(max_fd_number, tmp_fd_number);
+        agg_filter_size += file_meta->filter_size;
         if (tmp_num_entries_in_filter_by_file == 0) continue;
         if (level == 0) {
           if (compaction != nullptr && !level2removed_num_entries.empty()) {
@@ -169,8 +175,8 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
         // skip the current level if the current level has no entries
         if (num_entries_in_filter_by_level == 0) continue;
 
-        level_states_pq_.push(
-            LevelState(level, num_entries_in_filter_by_level, 0));
+        level_states_pq_.push(LevelState(level, num_entries_in_filter_by_level,
+                                         0, agg_filter_size));
         temp_sum_in_bpk_optimization_ +=
             std::log(num_entries_in_filter_by_level) *
             num_entries_in_filter_by_level;
@@ -199,11 +205,13 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
         for (FileMetaData* meta : vstorage_->LevelFiles(0)) {
           if (meta->fd.GetNumber() == level_states_pq_.top().file_number) {
             meta->bpk = 0.0;
+            skipped_filter_size += meta->filter_size;
           }
         }
       } else {
         levelIDs_with_bpk0_in_dynamic_monkey.insert(
             level_states_pq_.top().level);
+        skipped_filter_size += level_states_pq_.top().agg_filter_size;
       }
       tmp_num_entries_in_filter_by_file = level_states_pq_.top().num_entries;
       temp_sum_in_bpk_optimization_ -=
@@ -219,6 +227,7 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
 
     vstorage_->SetLevelIDsWithEmptyBpkInDynamicMonkey(
         levelIDs_with_bpk0_in_dynamic_monkey);
+    vstorage_->UpdateSkippedFilterSize(skipped_filter_size);
 
     if (!level_states_pq_.empty()) {
       dynamic_monkey_bpk_num_entries_threshold_ =
@@ -240,6 +249,7 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
     uint64_t num_empty_queries_in_compaction = 0;
     uint64_t num_files_in_compaction = 0;
     int max_level = -1;
+    uint64_t skipped_filter_size = 0;
     if (compaction != nullptr) {
       const std::vector<CompactionInputFiles>* input_files =
           compaction->inputs();
@@ -272,7 +282,7 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
           num_entries_in_bf = meta->num_entries - meta->num_range_deletions;
           num_entries_in_compaction_ += num_entries_in_bf;
           if (meta->bpk != -1) {
-            num_bits_for_filter_to_be_removed_ += num_entries_in_bf * meta->bpk;
+            num_bits_for_filter_to_be_removed_ += meta->filter_size;
           } else {
             num_bits_for_filter_to_be_removed_ +=
                 num_entries_in_bf * overall_bits_per_key_;
@@ -340,6 +350,9 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
           file_workload_state_pq_.push(
               FileWorkloadState(tmp_num_entries_in_filter_by_file,
                                 num_empty_point_reads, file_meta));
+        } else {
+          file_meta->bpk = 0.0;
+          skipped_filter_size += file_meta->filter_size;
         }
       }
     }
@@ -392,9 +405,10 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
         std::log(file_workload_state_pq_.top().weight * total_empty_queries_) +
                 common_constant_in_bpk_optimization_ >
             -log_2_squared) {
-      // if (file_workload_state_pq_.top().meta != nullptr) {
-      //   file_workload_state_pq_.top().meta->bpk = 0.0;
-      // }
+      if (file_workload_state_pq_.top().meta != nullptr) {
+        file_workload_state_pq_.top().meta->bpk = 0.0;
+        skipped_filter_size += file_workload_state_pq_.top().meta->filter_size;
+      }
       weight = file_workload_state_pq_.top().weight;
       temp_sum_in_bpk_optimization_ -=
           std::log(weight * total_empty_queries_) *
@@ -421,6 +435,7 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
     }
 
     vstorage_->UpdateNumEmptyPointReads(total_empty_queries_);
+    vstorage_->UpdateSkippedFilterSize(skipped_filter_size);
   }
 
   bpk_optimization_prepared_flag_ = true;
@@ -512,11 +527,15 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
     }
   }
 
-  uint64_t old_total_bits = vstorage_->GetCurrentTotalFilterSize() * 8.0 -
+  tmp_bits_per_key = std::min(tmp_bits_per_key, max_bits_per_key_);
+  uint64_t old_total_bits = vstorage_->GetCurrentTotalFilterSize() * 8 -
                             num_bits_for_filter_to_be_removed_;
+  if (old_total_bits > vstorage_->GetSkippedFilterSize() * 8) {
+    old_total_bits -= vstorage_->GetSkippedFilterSize() * 8;
+  }
   uint64_t old_total_entries =
       vstorage_->GetCurrentTotalNumEntries() - num_entries_in_compaction_;
-  const double overused_percentage = 0.01;
+  const double overused_percentage = 0.2;
   std::string stats_log = "";
   if (old_total_entries == 0 ||
       old_total_bits > old_total_entries * overall_bits_per_key_ *
@@ -533,13 +552,10 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
                  (1 +
                   overused_percentage)) {  // if the bits-per-key is overused
 
-    tmp_bits_per_key =
-        ((overall_bits_per_key_ * 1.01) * (old_total_entries + num_entries) -
-         old_total_bits) /
-        num_entries;
-    if (tmp_bits_per_key < overall_bits_per_key_) {
-      return false;
-    }
+    tmp_bits_per_key = ((overall_bits_per_key_ * (1 + overused_percentage)) *
+                            (old_total_entries + num_entries) -
+                        old_total_bits) /
+                       num_entries;
   }
   *bits_per_key = tmp_bits_per_key;
   return true;

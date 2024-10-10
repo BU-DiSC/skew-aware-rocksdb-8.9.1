@@ -2270,6 +2270,7 @@ VersionStorageInfo::VersionStorageInfo(
     accumulated_num_non_deletions_ =
         ref_vstorage->accumulated_num_non_deletions_;
     accumulated_num_deletions_ = ref_vstorage->accumulated_num_deletions_;
+    skipped_filter_size_ = ref_vstorage->GetSkippedFilterSize();
     current_num_non_deletions_ = ref_vstorage->current_num_non_deletions_;
     current_num_deletions_ = ref_vstorage->current_num_deletions_;
     current_num_samples_ = ref_vstorage->current_num_samples_;
@@ -3280,6 +3281,7 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
       storage_info_.GetBitsPerKeyCommonConstant() == 0 ||
       storage_info_.GetBitsPerKeyAllocationType() ==
           BitsPerKeyAllocationType::kDefaultBpkAlloc) {
+    if (max_accessed_modulars) *max_accessed_modulars = max_modulars_;
     return result;
   }
 
@@ -3347,6 +3349,7 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
     if (num_point_reads <= num_existing_point_reads ||
         storage_info_.accumulated_num_empty_point_reads_by_file_ == 0) {
       // all queries are existing queries, we can skip all the modules
+
       return true;
     }
 
@@ -3357,6 +3360,7 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
 
     uint64_t num_empty_point_reads = num_point_reads - num_existing_point_reads;
 
+    *max_accessed_modulars = max_modulars_;
     result =
         (std::log((meta->num_entries - meta->num_range_deletions) * 1.0 /
                   num_empty_point_reads *
@@ -3364,8 +3368,9 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
                       std::memory_order_relaxed)) +
          storage_info_.GetBitsPerKeyCommonConstant()) > 0;
     // skip this filter if no bpk should be assigned
-    if (result || max_accessed_modulars == NULL) return result;
-    *max_accessed_modulars = max_modulars_;
+    if (result || max_accessed_modulars == NULL) {
+      return result;
+    }
     return false;
     // size_t filter_size = 0;
     // double bpk = 0.0;

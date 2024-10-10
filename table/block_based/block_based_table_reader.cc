@@ -2155,13 +2155,7 @@ bool BlockBasedTable::FullFilterKeyMayMatch(
     may_match = filter->KeyMayMatch(user_key_without_ts, no_io, const_ikey_ptr,
                                     get_context, lookup_context, read_options,
                                     modular_filter_index);
-    if (may_match) {
-      RecordTick(rep_->ioptions.stats, BLOOM_FILTER_FULL_POSITIVE);
-      PERF_COUNTER_BY_LEVEL_ADD(bloom_filter_full_positive, 1, rep_->level);
-    } else {
-      RecordTick(rep_->ioptions.stats, BLOOM_FILTER_USEFUL);
-      PERF_COUNTER_BY_LEVEL_ADD(bloom_filter_useful, 1, rep_->level);
-    }
+
   } else if (!PrefixExtractorChanged(prefix_extractor) &&
              prefix_extractor->InDomain(user_key_without_ts)) {
     // FIXME ^^^: there should be no reason for Get() to depend on current
@@ -2354,7 +2348,7 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
         modular_filter_index >= get_context->max_accessed_modulars_) {
       tmp_no_io = true;
     }
-    may_match = FullFilterKeyMayMatch(filter, key, no_io, prefix_extractor,
+    may_match = FullFilterKeyMayMatch(filter, key, tmp_no_io, prefix_extractor,
                                       get_context, &lookup_context,
                                       read_options, modular_filter_index);
     if (!use_origin_filter && !skip_filters && may_match &&
@@ -2371,9 +2365,17 @@ Status BlockBasedTable::Get(const ReadOptions& read_options, const Slice& key,
   }
   get_context->filter_second_high_priority_cache_ = false;
   get_context->hash_digest_ = origin_hash_digest;
-  get_context->max_accessed_modulars_ = 1;
 
   TEST_SYNC_POINT("BlockBasedTable::Get:AfterFilterMatch");
+  if (rep_->whole_key_filtering) {
+    if (may_match) {
+      RecordTick(rep_->ioptions.stats, BLOOM_FILTER_FULL_POSITIVE);
+      PERF_COUNTER_BY_LEVEL_ADD(bloom_filter_full_positive, 1, rep_->level);
+    } else {
+      RecordTick(rep_->ioptions.stats, BLOOM_FILTER_USEFUL);
+      PERF_COUNTER_BY_LEVEL_ADD(bloom_filter_useful, 1, rep_->level);
+    }
+  }
   if (may_match) {
     IndexBlockIter iiter_on_stack;
     // if prefix_extractor found in block differs from options, disable

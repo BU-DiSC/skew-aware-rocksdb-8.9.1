@@ -53,14 +53,19 @@ class BitsPerKeyAllocHelper {
   double overall_bits_per_key_ = 0.0;
   uint64_t num_entries_in_compaction_ = 0;
   uint64_t num_bits_for_filter_to_be_removed_ = 0;
+
+  double max_bits_per_key_ = 100;
   struct LevelState {
     int level;
     uint64_t num_entries;
     uint64_t file_number;
-    LevelState(int _level, uint64_t _num_entries, uint64_t _file_number) {
+    uint64_t agg_filter_size;
+    LevelState(int _level, uint64_t _num_entries, uint64_t _file_number,
+               uint64_t _agg_filter_size = 0) {
       level = _level;
       num_entries = _num_entries;
       file_number = _file_number;
+      agg_filter_size = _agg_filter_size;
     }
     bool operator<(const LevelState& tmp) const {
       if (num_entries < tmp.num_entries) return true;
