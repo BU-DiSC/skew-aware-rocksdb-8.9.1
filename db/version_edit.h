@@ -673,8 +673,8 @@ class VersionEdit {
                const uint64_t compensated_range_deletion_size,
                uint64_t tail_size, bool user_defined_timestamps_persisted,
                uint64_t num_point_reads = 0,
-               uint64_t num_existing_point_reads = 0,
-               uint64_t start_global_point_read_number = 0) {
+               uint64_t num_existing_point_reads = 0, uint64_t filter_size = 0,
+               double bpk = -1, uint64_t start_global_point_read_number = 0) {
     assert(smallest_seqno <= largest_seqno);
     new_files_.emplace_back(
         level,
@@ -685,6 +685,8 @@ class VersionEdit {
                      file_checksum_func_name, unique_id,
                      compensated_range_deletion_size, tail_size,
                      user_defined_timestamps_persisted));
+    new_files_.back().second.bpk = bpk;
+    new_files_.back().second.filter_size = filter_size;
     if (num_point_reads != 0) {
       new_files_.back().second.stats.num_point_reads.store(num_point_reads);
       new_files_.back().second.stats.start_global_point_read_number =

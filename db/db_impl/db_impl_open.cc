@@ -617,17 +617,23 @@ Status DBImpl::Recover(
             edit.SetColumnFamily(cfd->GetID());
             for (const FileMetaData* f : level_files) {
               edit.DeleteFile(from_level, f->fd.GetNumber());
-              edit.AddFile(to_level, f->fd.GetNumber(), f->fd.GetPathId(),
-                           f->fd.GetFileSize(), f->smallest, f->largest,
-                           f->fd.smallest_seqno, f->fd.largest_seqno,
-                           f->marked_for_compaction,
-                           f->temperature,  // this can be different from
-                                            // `last_level_temperature`
-                           f->oldest_blob_file_number, f->oldest_ancester_time,
-                           f->file_creation_time, f->epoch_number,
-                           f->file_checksum, f->file_checksum_func_name,
-                           f->unique_id, f->compensated_range_deletion_size,
-                           f->tail_size, f->user_defined_timestamps_persisted);
+              edit.AddFile(
+                  to_level, f->fd.GetNumber(), f->fd.GetPathId(),
+                  f->fd.GetFileSize(), f->smallest, f->largest,
+                  f->fd.smallest_seqno, f->fd.largest_seqno,
+                  f->marked_for_compaction,
+                  f->temperature,  // this can be different from
+                                   // `last_level_temperature`
+                  f->oldest_blob_file_number, f->oldest_ancester_time,
+                  f->file_creation_time, f->epoch_number, f->file_checksum,
+                  f->file_checksum_func_name, f->unique_id,
+                  f->compensated_range_deletion_size, f->tail_size,
+                  f->user_defined_timestamps_persisted,
+                  f->stats.num_point_reads.load(std::memory_order_relaxed),
+                  f->stats.num_existing_point_reads.load(
+                      std::memory_order_relaxed),
+                  f->filter_size, f->bpk);
+
               ROCKS_LOG_WARN(immutable_db_options_.info_log,
                              "[%s] Moving #%" PRIu64
                              " from from_level-%d to from_level-%d %" PRIu64

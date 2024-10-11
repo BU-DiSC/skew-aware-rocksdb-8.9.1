@@ -1864,7 +1864,10 @@ Status DBImpl::ReFitLevel(ColumnFamilyData* cfd, int level, int target_level) {
           f->oldest_ancester_time, f->file_creation_time, f->epoch_number,
           f->file_checksum, f->file_checksum_func_name, f->unique_id,
           f->compensated_range_deletion_size, f->tail_size,
-          f->user_defined_timestamps_persisted);
+          f->user_defined_timestamps_persisted,
+          f->stats.num_point_reads.load(std::memory_order_relaxed),
+          f->stats.num_existing_point_reads.load(std::memory_order_relaxed),
+          f->filter_size, f->bpk);
     }
     ROCKS_LOG_DEBUG(immutable_db_options_.info_log,
                     "[%s] Apply version edit:\n%s", cfd->GetName().c_str(),
@@ -3743,7 +3746,10 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
             f->file_creation_time, f->epoch_number, f->file_checksum,
             f->file_checksum_func_name, f->unique_id,
             f->compensated_range_deletion_size, f->tail_size,
-            f->user_defined_timestamps_persisted);
+            f->user_defined_timestamps_persisted,
+            f->stats.num_point_reads.load(std::memory_order_relaxed),
+            f->stats.num_existing_point_reads.load(std::memory_order_relaxed),
+            f->filter_size, f->bpk);
 
         ROCKS_LOG_BUFFER(
             log_buffer,
