@@ -7699,21 +7699,16 @@ InternalIterator* VersionSet::MakeInputIterator(
       if (max_num_non_existing_point_reads >
               num_non_existing_point_reads_in_last_level &&
           num_entries_with_max_num_non_existing_point_reads > 0) {
+        double adjusted_avg_num_point_queries =
+            ((max_num_non_existing_point_reads -
+              num_non_existing_point_reads_in_last_level) *
+             1.0) /
+            c->num_input_files() /
+            num_entries_with_max_num_non_existing_point_reads;
         level_iter_with_max_non_existing_point_reads
-            ->SetAdjustedAvgNumPointQueries(
-                ((max_num_non_existing_point_reads -
-                  num_non_existing_point_reads_in_last_level) *
-                 1.0) /
-                c->num_input_files() /
-                num_entries_with_max_num_non_existing_point_reads);
-        stats_log +=
-            " adjusting level_iter with " +
-            std::to_string(((max_num_non_existing_point_reads -
-                             num_non_existing_point_reads_in_last_level) *
-                            1.0) /
-                           c->num_input_files() /
-                           num_entries_with_max_num_non_existing_point_reads) +
-            ". ";
+            ->SetAdjustedAvgNumPointQueries(adjusted_avg_num_point_queries);
+        stats_log += " adjusting level_iter with " +
+                     std::to_string(adjusted_avg_num_point_queries) + ". ";
       }
     } else {
       list[iterator_index_with_max_num_non_existing_point_reads]
