@@ -3361,8 +3361,8 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
     // }
 
     uint64_t num_empty_point_reads = num_point_reads - num_existing_point_reads;
-
     *max_accessed_modulars = max_modulars_;
+    return false;
     result =
         (std::log((meta->num_entries - meta->num_range_deletions) * 1.0 /
                   num_empty_point_reads *
