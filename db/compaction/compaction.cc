@@ -376,35 +376,41 @@ Compaction::Compaction(
     // calculate max_num_entries_in_output_levels used in monkey allocation
     max_num_entries_in_compaction_ = 0;
     max_num_entries_in_output_level_ = 0;
-    min_num_point_reads_ = std::numeric_limits<uint64_t>::max();
+    min_avg_num_point_reads_ = std::numeric_limits<double>::max();
     for (size_t which = 0; which < num_input_levels(); which++) {
       DoGenerateLevelFilesBrief(&input_levels_[which], inputs_[which].files,
                                 &arena_);
       num_input_files_ += inputs_[which].files.size();
     }
 
+    uint64_t tmp_entries = 0;
     for (size_t which = 0; which < num_input_levels(); which++) {
       if (inputs_[which].level != output_level_) {
         for (FileMetaData* meta : inputs_[which].files) {
-          max_num_entries_in_compaction_ +=
-              meta->num_entries - meta->num_range_deletions;
-          max_num_entries_in_output_level_ +=
-              meta->num_entries - meta->num_range_deletions;
+          tmp_entries = meta->num_entries - meta->num_range_deletions;
+          max_num_entries_in_compaction_ += tmp_entries;
+          max_num_entries_in_output_level_ += tmp_entries;
           auto result = meta->stats.GetEstimatedNumPointReads(
               vstorage->GetAccumulatedNumPointReads(),
               immutable_options_.point_read_learning_rate);
-          min_num_point_reads_ =
-              std::min(min_num_point_reads_,
-                       (uint64_t)floor(result.first / num_input_files_));
+          if (inputs_[which].level == 0) {
+            min_avg_num_point_reads_ =
+                std::min(min_avg_num_point_reads_,
+                         result.first * 1.0 / (tmp_entries * num_input_files_));
+          } else {
+            min_avg_num_point_reads_ = std::min(
+                min_avg_num_point_reads_, result.first * 1.0 / tmp_entries);
+          }
         }
       } else {
         for (FileMetaData* meta : inputs_[which].files) {
-          max_num_entries_in_compaction_ +=
-              meta->num_entries - meta->num_range_deletions;
+          tmp_entries = meta->num_entries - meta->num_range_deletions;
+          max_num_entries_in_compaction_ += tmp_entries;
           auto result = meta->stats.GetEstimatedNumPointReads(
               vstorage->GetAccumulatedNumPointReads(),
               immutable_options_.point_read_learning_rate);
-          min_num_point_reads_ = std::min(min_num_point_reads_, result.first);
+          min_avg_num_point_reads_ = std::min(min_avg_num_point_reads_,
+                                              result.first * 1.0 / tmp_entries);
         }
       }
     }

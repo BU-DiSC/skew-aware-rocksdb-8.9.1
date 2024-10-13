@@ -30,7 +30,7 @@ Status CompactionOutputs::Finish(
   FileMetaData* meta = GetMetaData();
   assert(meta != nullptr);
   Status s = intput_status;
-  uint64_t min_num_point_reads = compaction_->GetMinNumPointReads();
+  uint64_t min_num_point_reads = 0;
   if (s.ok()) {
     std::string seqno_to_time_mapping_str;
     seqno_to_time_mapping.Encode(
@@ -44,16 +44,8 @@ Status CompactionOutputs::Finish(
       uint64_t num_point_reads =
           std::min(compaction_->input_vstorage()->GetAccumulatedNumPointReads(),
                    (uint64_t)round(current_output().agg_num_point_reads));
-      // in case that some very small files are generated, we proportionally
-      // decrease the minimum number of point reads
-      if (meta->num_entries < compaction_->max_num_entries_in_compaction() /
-                                  (compaction_->num_input_files())) {
-        min_num_point_reads =
-            (uint64_t)round(meta->num_entries * 1.0 /
-                            (compaction_->max_num_entries_in_compaction() /
-                             (compaction_->num_input_files())) *
-                            min_num_point_reads);
-      }
+      min_num_point_reads = (uint64_t)round(
+          compaction_->GetMinAvgNumPointReads() * meta->num_entries);
       num_point_reads = std::max(min_num_point_reads, num_point_reads);
 
       file_point_read_inc(meta, num_point_reads);
@@ -84,12 +76,14 @@ Status CompactionOutputs::Finish(
           "[%s] Compaction generates new file %" PRIu64
           " in level %d"
           " (num_point_reads=%" PRIu64 ", num_existing_point_reads=%" PRIu64
-          " , min_num_point_reads=%" PRIu64 ") with reset bits-per-key %.4f",
+          " , min_num_point_reads=%" PRIu64
+          ", avg_min_num_point_reads %.4f) with reset bits-per-key %.4f",
           compaction_->column_family_data()->GetName().c_str(),
           meta->fd.GetNumber(), compaction_->output_level(),
           meta->stats.num_point_reads.load(std::memory_order_relaxed),
           meta->stats.num_existing_point_reads.load(std::memory_order_relaxed),
-          min_num_point_reads, new_bits_per_key);
+          min_num_point_reads, compaction_->GetMinAvgNumPointReads(),
+          new_bits_per_key);
     } else {
       ROCKS_LOG_INFO(
           compaction_->immutable_options()->info_log,

@@ -452,7 +452,7 @@ class Compaction {
     return avg_num_existing_point_reads_with_naiive_track_;
   }
 
-  uint64_t GetMinNumPointReads() const { return min_num_point_reads_; }
+  double GetMinAvgNumPointReads() const { return min_avg_num_point_reads_; }
 
  private:
   void SetInputVersion(Version* input_version);
@@ -597,8 +597,8 @@ class Compaction {
   uint64_t num_input_files_;
   uint64_t avg_num_point_reads_with_naiive_track_;
   uint64_t avg_num_existing_point_reads_with_naiive_track_;
-  uint64_t min_num_point_reads_;  // the inheritance method may underestimate
-                                  // the real number of point reads
+  double min_avg_num_point_reads_;  // the inheritance method may underestimate
+                                    // the real number of point reads
 };
 
 #ifndef NDEBUG
