@@ -38,6 +38,7 @@ Status CompactionOutputs::Finish(
         meta->fd.largest_seqno, meta->file_creation_time);
     builder_->SetSeqnoTimeTableProperties(seqno_to_time_mapping_str,
                                           meta->oldest_ancester_time);
+    meta->num_entries = builder_->NumEntries();
     if (compaction_->immutable_options()->point_reads_track_method ==
         kDynamicCompactionAwareTrack) {
       uint64_t num_point_reads =
@@ -45,16 +46,18 @@ Status CompactionOutputs::Finish(
                    (uint64_t)round(current_output().agg_num_point_reads));
       // in case that some very small files are generated, we proportionally
       // decrease the minimum number of point reads
-      if (meta->num_entries - meta->num_range_deletions <
-          compaction_->max_num_entries_in_output_level() /
-              (2 * compaction_->num_input_files())) {
-        min_num_point_reads = (uint64_t)round(
-            (meta->num_entries - meta->num_range_deletions) * 1.0 /
-            (compaction_->max_num_entries_in_output_level() /
-             (2 * compaction_->num_input_files())) *
-            min_num_point_reads);
+      if (meta->num_entries < compaction_->max_num_entries_in_output_level() /
+                                  (2 * compaction_->num_input_files())) {
+        min_num_point_reads =
+            (uint64_t)round(meta->num_entries * 1.0 /
+                            (compaction_->max_num_entries_in_output_level() /
+                             (2 * compaction_->num_input_files())) *
+                            min_num_point_reads);
       }
       num_point_reads = std::max(min_num_point_reads, num_point_reads);
+      if (num_point_reads == 0) {
+        num_point_reads = 1;
+      }
       file_point_read_inc(meta, num_point_reads);
       file_existing_point_read_inc(
           meta, std::min(num_point_reads,
@@ -67,7 +70,6 @@ Status CompactionOutputs::Finish(
       file_existing_point_read_inc(
           meta, compaction_->GetAvgNumExistingPointReadsWithNaiiveTrack());
     }
-    meta->num_entries = builder_->NumEntries();
     double new_bits_per_key = 0.0;
     bool reset_flag = false;
     if (bpk_alloc_helper_ != nullptr) {

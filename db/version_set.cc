@@ -3282,12 +3282,14 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
       storage_info_.GetBitsPerKeyAllocationType() ==
           BitsPerKeyAllocationType::kDefaultBpkAlloc) {
     if (max_accessed_modulars) *max_accessed_modulars = max_modulars_;
+    PERF_COUNTER_ADD(num_skipped_times, 1);
     return result;
   }
 
   // we already mark the bpk as 0 for each FileMetaData that is supposed to be
   // skipped, so in most cases we can read the filter if bpk is not 0.
   if (meta->bpk == 0) {
+    PERF_COUNTER_ADD(num_skipped_times, 1);
     return true;  // bpk == 0 means we choose not to build filter, thus we
                   // should skip it
   }
@@ -3350,6 +3352,7 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
         storage_info_.accumulated_num_empty_point_reads_by_file_ == 0) {
       // all queries are existing queries, we can skip all the modules
 
+      PERF_COUNTER_ADD(num_skipped_times, 1);
       return true;
     }
 
@@ -3369,6 +3372,7 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
          storage_info_.GetBitsPerKeyCommonConstant()) > 0;
     // skip this filter if no bpk should be assigned
     if (result || max_accessed_modulars == NULL) {
+      PERF_COUNTER_ADD(num_skipped_times, 1);
       return result;
     }
     return false;
