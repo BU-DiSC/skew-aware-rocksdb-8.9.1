@@ -125,6 +125,10 @@ class Compaction {
     return max_num_entries_in_output_level_;
   }
 
+  uint64_t max_num_entries_in_compaction() const {
+    return max_num_entries_in_compaction_;
+  }
+
   // Outputs will go to this level
   int output_level() const { return output_level_; }
 
@@ -510,6 +514,7 @@ class Compaction {
   Arena arena_;  // Arena used to allocate space for file_levels_
 
   uint64_t max_num_entries_in_output_level_;
+  uint64_t max_num_entries_in_compaction_;
   const uint32_t output_path_id_;
   CompressionType output_compression_;
   CompressionOptions output_compression_opts_;

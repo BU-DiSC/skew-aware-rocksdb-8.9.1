@@ -374,6 +374,7 @@ Compaction::Compaction(
     uint64_t agg_num_existing_reads = 0;
     input_levels_.resize(num_input_levels());
     // calculate max_num_entries_in_output_levels used in monkey allocation
+    max_num_entries_in_compaction_ = 0;
     max_num_entries_in_output_level_ = 0;
     min_num_point_reads_ = std::numeric_limits<uint64_t>::max();
     for (size_t which = 0; which < num_input_levels(); which++) {
@@ -385,6 +386,8 @@ Compaction::Compaction(
     for (size_t which = 0; which < num_input_levels(); which++) {
       if (inputs_[which].level != output_level_) {
         for (FileMetaData* meta : inputs_[which].files) {
+          max_num_entries_in_compaction_ +=
+              meta->num_entries - meta->num_range_deletions;
           max_num_entries_in_output_level_ +=
               meta->num_entries - meta->num_range_deletions;
           auto result = meta->stats.GetEstimatedNumPointReads(
@@ -394,16 +397,24 @@ Compaction::Compaction(
               std::min(min_num_point_reads_,
                        (uint64_t)floor(result.first / num_input_files_));
         }
+      } else {
+        for (FileMetaData* meta : inputs_[which].files) {
+          max_num_entries_in_compaction_ +=
+              meta->num_entries - meta->num_range_deletions;
+          auto result = meta->stats.GetEstimatedNumPointReads(
+              vstorage->GetAccumulatedNumPointReads(),
+              immutable_options_.point_read_learning_rate);
+          min_num_point_reads_ = std::min(min_num_point_reads_, result.first);
+        }
       }
     }
-    for (const FileMetaData* meta :
-         input_vstorage_->LevelFiles(output_level_)) {
-      max_num_entries_in_output_level_ +=
-          meta->num_entries - meta->num_range_deletions;
-      auto result = meta->stats.GetEstimatedNumPointReads(
-          vstorage->GetAccumulatedNumPointReads(),
-          immutable_options_.point_read_learning_rate);
-      min_num_point_reads_ = std::min(min_num_point_reads_, result.first);
+    if (input_vstorage_->GetBitsPerKeyAllocationType() ==
+        BitsPerKeyAllocationType::kDynamicMonkeyBpkAlloc) {
+      for (const FileMetaData* meta :
+           input_vstorage_->LevelFiles(output_level_)) {
+        max_num_entries_in_output_level_ +=
+            meta->num_entries - meta->num_range_deletions;
+      }
     }
 
     if (immutable_options_.point_reads_track_method == kNaiiveTrack) {

@@ -3282,7 +3282,6 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
       storage_info_.GetBitsPerKeyAllocationType() ==
           BitsPerKeyAllocationType::kDefaultBpkAlloc) {
     if (max_accessed_modulars) *max_accessed_modulars = max_modulars_;
-    PERF_COUNTER_ADD(num_skipped_times, 1);
     return result;
   }
 

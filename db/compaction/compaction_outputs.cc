@@ -46,18 +46,16 @@ Status CompactionOutputs::Finish(
                    (uint64_t)round(current_output().agg_num_point_reads));
       // in case that some very small files are generated, we proportionally
       // decrease the minimum number of point reads
-      if (meta->num_entries < compaction_->max_num_entries_in_output_level() /
+      if (meta->num_entries < compaction_->max_num_entries_in_compaction() /
                                   (2 * compaction_->num_input_files())) {
         min_num_point_reads =
             (uint64_t)round(meta->num_entries * 1.0 /
-                            (compaction_->max_num_entries_in_output_level() /
+                            (compaction_->max_num_entries_in_compaction() /
                              (2 * compaction_->num_input_files())) *
                             min_num_point_reads);
       }
       num_point_reads = std::max(min_num_point_reads, num_point_reads);
-      if (num_point_reads == 0) {
-        num_point_reads = 1;
-      }
+
       file_point_read_inc(meta, num_point_reads);
       file_existing_point_read_inc(
           meta, std::min(num_point_reads,
