@@ -396,7 +396,9 @@ Compaction::Compaction(
           if (inputs_[which].level == 0) {
             min_avg_num_point_reads_ =
                 std::min(min_avg_num_point_reads_,
-                         result.first * 1.0 / (tmp_entries * num_input_files_));
+                         result.first * 1.0 /
+                             (tmp_entries * inputs_[which].files.size() +
+                              num_input_levels() - 1));
           } else {
             min_avg_num_point_reads_ = std::min(
                 min_avg_num_point_reads_, result.first * 1.0 / tmp_entries);
