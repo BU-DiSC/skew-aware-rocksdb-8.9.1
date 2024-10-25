@@ -347,6 +347,13 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
               tmp_num_entries_in_filter_by_file;
           workload_aware_num_entries_with_empty_queries_ +=
               tmp_num_entries_in_filter_by_file;
+          if (file_meta->filter_size != 0) {
+            file_meta->bpk =
+                file_meta->filter_size * 8 /
+                (file_meta->num_entries - file_meta->num_range_deletions);
+          } else {
+            file_meta->bpk = 0;
+          }
           file_workload_state_pq_.push(
               FileWorkloadState(tmp_num_entries_in_filter_by_file,
                                 num_empty_point_reads, file_meta));

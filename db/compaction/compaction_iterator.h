@@ -44,6 +44,7 @@ class SequenceIterWrapper : public InternalIterator {
     inner_iter_->Next();
     SetAvgNumPointReads(inner_iter_->GetAvgNumPointReads());
     SetAvgNumExistingPointReads(inner_iter_->GetAvgNumExistingPointReads());
+    SetIsDeepestLevel(inner_iter_->IsDeepestLevel());
   }
   void Seek(const Slice& target) override {
     if (!need_count_entries_) {
@@ -280,6 +281,7 @@ class CompactionIterator {
   double GetAvgNumExistingPointReads() const {
     return input_.GetAvgNumExistingPointReads();
   }
+  bool IsDeepestLevel() const { return input_.IsDeepestLevel(); }
 
   bool IsDeleteRangeSentinelKey() const { return is_range_del_; }
 

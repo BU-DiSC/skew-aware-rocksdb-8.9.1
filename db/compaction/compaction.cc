@@ -376,46 +376,81 @@ Compaction::Compaction(
     // calculate max_num_entries_in_output_levels used in monkey allocation
     max_num_entries_in_compaction_ = 0;
     max_num_entries_in_output_level_ = 0;
-    min_avg_num_point_reads_ = std::numeric_limits<double>::max();
+    existing_entries_in_output_level_ = 0;
+    min_avg_num_point_reads_from_upper_level_ = 0;
+    max_avg_num_point_reads_ = 0;
+    agg_total_num_point_reads_ = vstorage->GetAccumulatedNumPointReads();
+
+    std::vector<size_t> num_entries_per_level(num_input_levels(), 0);
+    double avg_num_point_reads_per_lvl0_file = 0.0;
     for (size_t which = 0; which < num_input_levels(); which++) {
+      if (inputs_[which].level == 0) {
+        avg_num_point_reads_per_lvl0_file =
+            vstorage->GetAvgNumPointReadsPerLvl0File();
+      } else {
+        avg_num_point_reads_per_lvl0_file = 0.0;
+      }
       DoGenerateLevelFilesBrief(&input_levels_[which], inputs_[which].files,
-                                &arena_);
+                                &arena_, agg_total_num_point_reads_,
+                                immutable_options_.point_read_learning_rate, -1,
+                                avg_num_point_reads_per_lvl0_file);
       num_input_files_ += inputs_[which].files.size();
+      for (FileMetaData* meta : inputs_[which].files) {
+        num_entries_per_level[which] +=
+            meta->num_entries - meta->num_range_deletions;
+      }
+      max_num_entries_in_compaction_ += num_entries_per_level[which];
     }
 
     uint64_t tmp_entries = 0;
+    // use the minimum avg point reads per file to represent the avg point reads
+    // per sorted run and choose the maximum among them
     for (size_t which = 0; which < num_input_levels(); which++) {
       if (inputs_[which].level != output_level_) {
-        for (FileMetaData* meta : inputs_[which].files) {
-          tmp_entries = meta->num_entries - meta->num_range_deletions;
-          max_num_entries_in_compaction_ += tmp_entries;
-          max_num_entries_in_output_level_ += tmp_entries;
-          auto result = meta->stats.GetEstimatedNumPointReads(
-              vstorage->GetAccumulatedNumPointReads(),
-              immutable_options_.point_read_learning_rate);
-          if (inputs_[which].level == 0) {
-            min_avg_num_point_reads_ =
-                std::min(min_avg_num_point_reads_,
-                         result.first * 1.0 /
-                             (tmp_entries * inputs_[which].files.size() +
-                              num_input_levels() - 1));
-          } else {
-            min_avg_num_point_reads_ = std::min(
-                min_avg_num_point_reads_, result.first * 1.0 / tmp_entries);
+        max_num_entries_in_output_level_ += num_entries_per_level[which];
+        if (inputs_[which].level == 0) {
+          for (size_t i = 0; i < input_levels_[which].num_files; i++) {
+            tmp_entries = inputs_[which].files[i]->num_entries -
+                          inputs_[which].files[i]->num_range_deletions;
+            max_avg_num_point_reads_ = std::max(
+                max_avg_num_point_reads_,
+                input_levels_[which].files[i].snapshot_num_point_reads * 1.0 /
+                    tmp_entries);
+            ;
+            min_avg_num_point_reads_from_upper_level_ = std::max(
+                min_avg_num_point_reads_from_upper_level_,
+                input_levels_[which].files[i].snapshot_num_point_reads * 1.0 /
+                    tmp_entries / inputs_[which].files.size());
           }
+        } else {
+          double temp_avg_num_point_reads_from_upper_level_ =
+              std::numeric_limits<double>::max();
+          if (inputs_[which].files.size() == 0)
+            temp_avg_num_point_reads_from_upper_level_ = 0;
+          for (size_t i = 0; i < input_levels_[which].num_files; i++) {
+            tmp_entries = inputs_[which].files[i]->num_entries -
+                          inputs_[which].files[i]->num_range_deletions;
+            max_avg_num_point_reads_ = std::max(
+                max_avg_num_point_reads_,
+                input_levels_[which].files[i].snapshot_num_point_reads * 1.0 /
+                    tmp_entries);
+            ;
+            temp_avg_num_point_reads_from_upper_level_ = std::min(
+                temp_avg_num_point_reads_from_upper_level_,
+                input_levels_[which].files[i].snapshot_num_point_reads *
+                    num_entries_per_level[which] * 1.0 /
+                    (tmp_entries * inputs_[which].files.size() *
+                     max_num_entries_in_compaction_));
+          }
+          min_avg_num_point_reads_from_upper_level_ =
+              std::max(min_avg_num_point_reads_from_upper_level_,
+                       temp_avg_num_point_reads_from_upper_level_);
         }
       } else {
-        for (FileMetaData* meta : inputs_[which].files) {
-          tmp_entries = meta->num_entries - meta->num_range_deletions;
-          max_num_entries_in_compaction_ += tmp_entries;
-          auto result = meta->stats.GetEstimatedNumPointReads(
-              vstorage->GetAccumulatedNumPointReads(),
-              immutable_options_.point_read_learning_rate);
-          min_avg_num_point_reads_ = std::min(min_avg_num_point_reads_,
-                                              result.first * 1.0 / tmp_entries);
-        }
+        existing_entries_in_output_level_ = num_entries_per_level[which];
       }
     }
+
     if (input_vstorage_->GetBitsPerKeyAllocationType() ==
         BitsPerKeyAllocationType::kDynamicMonkeyBpkAlloc) {
       for (const FileMetaData* meta :

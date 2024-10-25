@@ -284,6 +284,7 @@ void CompactionMergingIterator::Next() {
     current_->iter.Next();
     SetAvgNumPointReads(current_->iter.GetAvgNumPointReads());
     SetAvgNumExistingPointReads(current_->iter.GetAvgNumExistingPointReads());
+    SetIsDeepestLevel(current_->iter.IsDeepestLevel());
     if (current_->iter.Valid()) {
       // current is still valid after the Next() call above.  Call
       // replace_top() to restore the heap property.  When the same child
@@ -329,6 +330,7 @@ void CompactionMergingIterator::FindNextVisibleKey() {
     current->iter.Next();
     SetAvgNumPointReads(current_->iter.GetAvgNumPointReads());
     SetAvgNumExistingPointReads(current_->iter.GetAvgNumExistingPointReads());
+    SetIsDeepestLevel(current_->iter.IsDeepestLevel());
     if (current->iter.Valid()) {
       assert(current->iter.status().ok());
       minHeap_.replace_top(current);

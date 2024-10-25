@@ -122,7 +122,11 @@ extern bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
 // arena: Arena used to allocate the memory
 extern void DoGenerateLevelFilesBrief(LevelFilesBrief* file_level,
                                       const std::vector<FileMetaData*>& files,
-                                      Arena* arena);
+                                      Arena* arena,
+                                      uint64_t current_global_point_read_number,
+                                      double learning_rate,
+                                      int est_interval = -1,
+                                      double min_num_point_reads_ratio = 0.0);
 enum EpochNumberRequirement {
   kMightMissing,
   kMustPresent,
@@ -738,7 +742,7 @@ class VersionStorageInfo {
     file_indexer_.UpdateIndex(&arena_, num_non_empty_levels_, files_);
   }
 
-  void GenerateLevelFilesBrief();
+  void GenerateLevelFilesBrief(const ImmutableOptions& ioptions);
   void GenerateLevel0NonOverlapping();
   void GenerateBottommostFiles();
   void GenerateFileLocationIndex();

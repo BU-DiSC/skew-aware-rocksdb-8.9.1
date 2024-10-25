@@ -49,6 +49,12 @@ class InternalIteratorBase : public Cleanable {
     return avg_num_existing_point_reads_;
   }
 
+  bool IsDeepestLevel() const { return is_deepest_level_; }
+
+  void SetIsDeepestLevel(bool is_deepest_level) {
+    is_deepest_level_ = is_deepest_level;
+  }
+
   void SetAvgNumPointReads(double avg_num_point_reads) {
     avg_num_point_reads_ = avg_num_point_reads;
   }
@@ -232,6 +238,7 @@ class InternalIteratorBase : public Cleanable {
  private:
   double avg_num_point_reads_ = 0.0;
   double avg_num_existing_point_reads_ = 0.0;
+  bool is_deepest_level_ = false;
 };
 
 using InternalIterator = InternalIteratorBase<Slice>;

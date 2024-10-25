@@ -31,6 +31,7 @@ Status CompactionOutputs::Finish(
   assert(meta != nullptr);
   Status s = intput_status;
   uint64_t min_num_point_reads = 0;
+  uint64_t num_point_reads = 0;
   if (s.ok()) {
     std::string seqno_to_time_mapping_str;
     seqno_to_time_mapping.Encode(
@@ -41,12 +42,26 @@ Status CompactionOutputs::Finish(
     meta->num_entries = builder_->NumEntries();
     if (compaction_->immutable_options()->point_reads_track_method ==
         kDynamicCompactionAwareTrack) {
-      uint64_t num_point_reads =
+      num_point_reads =
           std::min(compaction_->input_vstorage()->GetAccumulatedNumPointReads(),
                    (uint64_t)round(current_output().agg_num_point_reads));
-      min_num_point_reads = (uint64_t)round(
-          compaction_->GetMinAvgNumPointReads() * meta->num_entries);
-      num_point_reads = std::max(min_num_point_reads, num_point_reads);
+      uint64_t agg_num_entries_from_upper_level =
+          current_output().agg_num_entries_from_upper_level;
+      min_num_point_reads =
+          round(compaction_->GetMinAvgNumPointReadsUpperLevel() *
+                agg_num_entries_from_upper_level);
+      if (meta->num_entries > agg_num_entries_from_upper_level) {
+        min_num_point_reads = std::max(
+            min_num_point_reads,
+            (uint64_t)round(
+                current_output().min_curr_avg_point_reads_from_deepest_level *
+                (meta->num_entries - agg_num_entries_from_upper_level)));
+      }
+      num_point_reads = std::max(num_point_reads, min_num_point_reads);
+      double avg_num_point_reads =
+          std::min(num_point_reads * 1.0 / meta->num_entries,
+                   compaction_->GetMaxAvgNumPointReads());
+      num_point_reads = round(avg_num_point_reads * meta->num_entries);
 
       file_point_read_inc(meta, num_point_reads);
       file_existing_point_read_inc(
@@ -77,13 +92,14 @@ Status CompactionOutputs::Finish(
           " in level %d"
           " (num_point_reads=%" PRIu64 ", num_existing_point_reads=%" PRIu64
           " , min_num_point_reads=%" PRIu64
-          ", avg_min_num_point_reads %.4f) with reset bits-per-key %.4f",
+          ", num_entries_from_upper_level=%" PRIu64
+          ") with reset bits-per-key %.4f",
           compaction_->column_family_data()->GetName().c_str(),
           meta->fd.GetNumber(), compaction_->output_level(),
           meta->stats.num_point_reads.load(std::memory_order_relaxed),
           meta->stats.num_existing_point_reads.load(std::memory_order_relaxed),
-          min_num_point_reads, compaction_->GetMinAvgNumPointReads(),
-          new_bits_per_key);
+          min_num_point_reads,
+          current_output().agg_num_entries_from_upper_level, new_bits_per_key);
     } else {
       ROCKS_LOG_INFO(
           compaction_->immutable_options()->info_log,
@@ -476,6 +492,15 @@ Status CompactionOutputs::AddToOutput(
     current_output().agg_num_point_reads += c_iter.GetAvgNumPointReads();
     current_output().agg_num_existing_point_reads +=
         c_iter.GetAvgNumExistingPointReads();
+  }
+  if (!c_iter.IsDeepestLevel()) {
+    current_output().agg_num_entries_from_upper_level++;
+    current_output().agg_num_point_reads_from_upper_level +=
+        c_iter.GetAvgNumPointReads();
+  } else {
+    current_output().min_curr_avg_point_reads_from_deepest_level =
+        std::min(current_output().min_curr_avg_point_reads_from_deepest_level,
+                 c_iter.GetAvgNumPointReads());
   }
 
   if (!s.ok()) {

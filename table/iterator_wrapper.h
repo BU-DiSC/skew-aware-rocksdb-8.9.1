@@ -52,12 +52,24 @@ class IteratorWrapperBase {
     }
   }
 
+  bool IsDeepestLevel() const {
+    if (iter_) {
+      return iter_->IsDeepestLevel();
+    } else {
+      return false;
+    }
+  }
+
   void SetAvgNumPointReads(double avg_num_point_reads) {
     iter_->SetAvgNumPointReads(avg_num_point_reads);
   }
 
   void SetAvgNumExistingPointReads(double avg_num_existing_point_reads) {
     iter_->SetAvgNumExistingPointReads(avg_num_existing_point_reads);
+  }
+
+  void SetIsDeepestLevel(bool is_deepest_level) {
+    iter_->SetIsDeepestLevel(is_deepest_level);
   }
 
   // Set the underlying Iterator to _iter and return

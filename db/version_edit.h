@@ -325,6 +325,8 @@ struct FileSampledStats {
     }
     est_num_point_reads =
         std::max(est_num_point_reads, min_num_point_reads + GetNumPointReads());
+    est_num_point_reads =
+        std::min(est_num_point_reads, current_global_point_read_number);
     double est_existing_ratio = 0.0;
     uint64_t num_existing_point_reads_in_window = 0;
     if (global_point_read_number_window.size() == 64) {
@@ -550,16 +552,36 @@ struct FdWithKeyRange {
   FileMetaData* file_metadata;  // Point to all metadata
   Slice smallest_key;           // slice that contain smallest key
   Slice largest_key;            // slice that contain largest key
+  uint64_t snapshot_num_point_reads;
+  uint64_t snapshot_num_existing_point_reads;
 
   FdWithKeyRange()
-      : fd(), file_metadata(nullptr), smallest_key(), largest_key() {}
+      : fd(),
+        file_metadata(nullptr),
+        smallest_key(),
+        largest_key(),
+        snapshot_num_point_reads(0),
+        snapshot_num_existing_point_reads(0) {}
 
   FdWithKeyRange(FileDescriptor _fd, Slice _smallest_key, Slice _largest_key,
                  FileMetaData* _file_metadata)
       : fd(_fd),
         file_metadata(_file_metadata),
         smallest_key(_smallest_key),
-        largest_key(_largest_key) {}
+        largest_key(_largest_key),
+        snapshot_num_point_reads(0),
+        snapshot_num_existing_point_reads(0) {}
+
+  void InitNumPointReadStats(uint64_t global_num_point_read_counter,
+                             double learning_rate, int est_interval,
+                             uint64_t min_point_reads) {
+    if (file_metadata) {
+      std::tie(snapshot_num_point_reads, snapshot_num_existing_point_reads) =
+          file_metadata->stats.GetEstimatedNumPointReads(
+              global_num_point_read_counter, learning_rate, est_interval,
+              min_point_reads);
+    }
+  }
 };
 
 // Data structure to store an array of FdWithKeyRange in one level

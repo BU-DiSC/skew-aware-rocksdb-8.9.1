@@ -125,6 +125,10 @@ class Compaction {
     return max_num_entries_in_output_level_;
   }
 
+  uint64_t existing_entries_in_output_level() const {
+    return existing_entries_in_output_level_;
+  }
+
   uint64_t max_num_entries_in_compaction() const {
     return max_num_entries_in_compaction_;
   }
@@ -452,7 +456,17 @@ class Compaction {
     return avg_num_existing_point_reads_with_naiive_track_;
   }
 
-  double GetMinAvgNumPointReads() const { return min_avg_num_point_reads_; }
+  double GetMaxAvgNumPointReads() const { return max_avg_num_point_reads_; }
+
+  double GetMinAvgNumPointReadsUpperLevel() const {
+    return min_avg_num_point_reads_from_upper_level_;
+  }
+  // double GetMinAvgNumPointReadsDeepestLevel() const { return
+  // min_avg_num_point_reads_from_deepest_level_; }
+
+  uint64_t GetSnapshotAggTotalNumPointReads() const {
+    return agg_total_num_point_reads_;
+  }
 
  private:
   void SetInputVersion(Version* input_version);
@@ -514,6 +528,7 @@ class Compaction {
   Arena arena_;  // Arena used to allocate space for file_levels_
 
   uint64_t max_num_entries_in_output_level_;
+  uint64_t existing_entries_in_output_level_;
   uint64_t max_num_entries_in_compaction_;
   const uint32_t output_path_id_;
   CompressionType output_compression_;
@@ -595,10 +610,14 @@ class Compaction {
       PenultimateOutputRangeType::kNotSupported;
 
   uint64_t num_input_files_;
+  uint64_t agg_total_num_point_reads_;
   uint64_t avg_num_point_reads_with_naiive_track_;
   uint64_t avg_num_existing_point_reads_with_naiive_track_;
-  double min_avg_num_point_reads_;  // the inheritance method may underestimate
-                                    // the real number of point reads
+  double
+      min_avg_num_point_reads_from_upper_level_;  // the inheritance method may
+                                                  // underestimate the real
+                                                  // number of point reads
+  double max_avg_num_point_reads_;
 };
 
 #ifndef NDEBUG

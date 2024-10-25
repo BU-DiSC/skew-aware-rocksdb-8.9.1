@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <unordered_map>
+
 #include "db/blob/blob_garbage_meter.h"
 #include "db/bpk_alloc_helper.h"
 #include "db/compaction/compaction.h"
@@ -42,7 +44,11 @@ class CompactionOutputs {
     bool finished;
     std::shared_ptr<const TableProperties> table_properties;
     double agg_num_point_reads = 0.0;
+    double agg_num_point_reads_from_upper_level = 0.0;
     double agg_num_existing_point_reads = 0.0;
+    uint64_t agg_num_entries_from_upper_level = 0;
+    double min_curr_avg_point_reads_from_deepest_level =
+        std::numeric_limits<double>::max();
   };
 
   CompactionOutputs() = delete;
