@@ -80,11 +80,13 @@ Status CompactionOutputs::Finish(
     if (bpk_alloc_helper_ != nullptr) {
       reset_flag = bpk_alloc_helper_->IfNeedAllocateBitsPerKey(
           *meta, compaction_->max_num_entries_in_output_level(),
-          &new_bits_per_key);
+          &new_bits_per_key,
+          compaction_->bottommost_level() || compaction_->is_last_level());
     }
 
     if (reset_flag) {
-      builder_->ResetFilterBitsPerKey(new_bits_per_key);
+      double origin_bits_per_key = new_bits_per_key;
+      builder_->ResetFilterBitsPerKey(&new_bits_per_key);
       meta->bpk = new_bits_per_key;
       ROCKS_LOG_INFO(
           compaction_->immutable_options()->info_log,
@@ -93,25 +95,27 @@ Status CompactionOutputs::Finish(
           " (num_point_reads=%" PRIu64 ", num_existing_point_reads=%" PRIu64
           " , min_num_point_reads=%" PRIu64
           ", num_entries_from_upper_level=%" PRIu64
-          ") with reset bits-per-key %.4f",
+          ") with reset bits-per-key %.4f / %.4f / %.4f",
           compaction_->column_family_data()->GetName().c_str(),
           meta->fd.GetNumber(), compaction_->output_level(),
           meta->stats.num_point_reads.load(std::memory_order_relaxed),
           meta->stats.num_existing_point_reads.load(std::memory_order_relaxed),
           min_num_point_reads,
-          current_output().agg_num_entries_from_upper_level, new_bits_per_key);
+          current_output().agg_num_entries_from_upper_level, new_bits_per_key,
+          bpk_alloc_helper_->avg_curr_bits_per_key, origin_bits_per_key);
     } else {
       ROCKS_LOG_INFO(
           compaction_->immutable_options()->info_log,
           "[%s] Compaction generates new file %" PRIu64
           " in level %d"
           " (num_point_reads=%" PRIu64 ", num_existing_point_reads=%" PRIu64
-          " , min_num_point_reads=%" PRIu64 ") with no reset bits-per-key",
+          " , min_num_point_reads=%" PRIu64
+          ") with no reset bits-per-key / %.4f",
           compaction_->column_family_data()->GetName().c_str(),
           meta->fd.GetNumber(), compaction_->output_level(),
           meta->stats.num_point_reads.load(std::memory_order_relaxed),
           meta->stats.num_existing_point_reads.load(std::memory_order_relaxed),
-          min_num_point_reads);
+          min_num_point_reads, bpk_alloc_helper_->avg_curr_bits_per_key);
     }
 
     s = builder_->Finish();

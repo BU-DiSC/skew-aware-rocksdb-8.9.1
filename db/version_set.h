@@ -120,13 +120,11 @@ extern bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
 // Generate LevelFilesBrief from vector<FdWithKeyRange*>
 // Would copy smallest_key and largest_key data to sequential memory
 // arena: Arena used to allocate the memory
-extern void DoGenerateLevelFilesBrief(LevelFilesBrief* file_level,
-                                      const std::vector<FileMetaData*>& files,
-                                      Arena* arena,
-                                      uint64_t current_global_point_read_number,
-                                      double learning_rate,
-                                      int est_interval = -1,
-                                      double min_num_point_reads_ratio = 0.0);
+extern void DoGenerateLevelFilesBrief(
+    LevelFilesBrief* file_level, const std::vector<FileMetaData*>& files,
+    Arena* arena, uint64_t current_global_point_read_number = 0,
+    double learning_rate = 0.0, int est_interval = -1,
+    double min_num_point_reads_ratio = 0.0);
 enum EpochNumberRequirement {
   kMightMissing,
   kMustPresent,

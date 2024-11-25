@@ -7669,8 +7669,9 @@ InternalIterator* VersionSet::MakeInputIterator(
           tmp_level_iterator->SetIsDeepestLevelInCompaction(true);
           num_non_existing_point_reads_in_last_level =
               temp_agg_num_non_existing_point_reads;
-          factor = c->max_num_entries_in_compaction() * 1.0 *
-                   flevel->num_files / c->existing_entries_in_output_level();
+          // factor = c->max_num_entries_in_compaction() * 1.0 *
+          //         flevel->num_files / c->existing_entries_in_output_level();
+          factor = 1.0;
           tmp_level_iterator->SetNumPointReadsFactor(factor);
           stats_log += " factor : " + std::to_string(factor);
         }
@@ -7784,27 +7785,13 @@ InternalIterator* VersionSet::MakeInputIterator(
         num_non_existing_point_reads_for_file_with_smallest_key * 1.0 /
             (meta_for_file_with_smallest_key->num_entries -
              meta_for_file_with_smallest_key->num_range_deletions) /
-            c->num_input_files());
+            input_sorted_runs);
     stats_log +=
         " adjusting file (pure iter) with smallest key: " +
         std::to_string(meta_for_file_with_smallest_key->fd.GetNumber()) +
         " by " +
         std::to_string(num_non_existing_point_reads_for_file_with_smallest_key *
-                       1.0 / c->num_input_files() /
-                       (meta_for_file_with_smallest_key->num_entries -
-                        meta_for_file_with_smallest_key->num_range_deletions));
-  } else {
-    level_iter_with_smallest_key->SetAdjustedAvgNumPointQueriesForLeftmostFile(
-        num_non_existing_point_reads_for_file_with_smallest_key * 1.0 /
-        (meta_for_file_with_smallest_key->num_entries -
-         meta_for_file_with_smallest_key->num_range_deletions) /
-        c->num_input_files());
-    stats_log +=
-        " adjusting file (level iter) with smallest key: " +
-        std::to_string(meta_for_file_with_smallest_key->fd.GetNumber()) +
-        " by " +
-        std::to_string(num_non_existing_point_reads_for_file_with_smallest_key *
-                       1.0 / c->num_input_files() /
+                       1.0 / input_sorted_runs /
                        (meta_for_file_with_smallest_key->num_entries -
                         meta_for_file_with_smallest_key->num_range_deletions));
   }
@@ -7813,7 +7800,7 @@ InternalIterator* VersionSet::MakeInputIterator(
     list[iterator_index_with_largest_key]->SetAvgNumPointReads(
         list[iterator_index_with_largest_key]->GetAvgNumExistingPointReads() +
         num_non_existing_point_reads_for_file_with_largest_key * 1.0 /
-            c->num_input_files() /
+            input_sorted_runs /
             (meta_for_file_with_largest_key->num_entries -
              meta_for_file_with_largest_key->num_range_deletions));
 
@@ -7822,21 +7809,7 @@ InternalIterator* VersionSet::MakeInputIterator(
         std::to_string(meta_for_file_with_largest_key->fd.GetNumber()) +
         " by " +
         std::to_string(num_non_existing_point_reads_for_file_with_largest_key *
-                       1.0 / c->num_input_files() /
-                       (meta_for_file_with_largest_key->num_entries -
-                        meta_for_file_with_largest_key->num_range_deletions));
-  } else {
-    level_iter_with_largest_key->SetAdjustedAvgNumPointQueriesForRightmostFile(
-        num_non_existing_point_reads_for_file_with_largest_key * 1.0 /
-        c->num_input_files() /
-        (meta_for_file_with_largest_key->num_entries -
-         meta_for_file_with_largest_key->num_range_deletions));
-    stats_log +=
-        " adjusting file (level iter) with largestkey: " +
-        std::to_string(meta_for_file_with_largest_key->fd.GetNumber()) +
-        " by " +
-        std::to_string(num_non_existing_point_reads_for_file_with_largest_key *
-                       1.0 / c->num_input_files() /
+                       1.0 / input_sorted_runs /
                        (meta_for_file_with_largest_key->num_entries -
                         meta_for_file_with_largest_key->num_range_deletions));
   }

@@ -247,6 +247,12 @@ bool VersionEdit::EncodeTo(std::string* dst,
       PutVarint64(&varint_tail_size, f.tail_size);
       PutLengthPrefixedSlice(dst, Slice(varint_tail_size));
     }
+    if (f.filter_size) {
+      PutVarint32(dst, NewFileCustomTag::kFilterSize);
+      std::string varint_filter_size;
+      PutVarint64(&varint_filter_size, f.filter_size);
+      PutLengthPrefixedSlice(dst, Slice(varint_filter_size));
+    }
     if (!f.user_defined_timestamps_persisted) {
       // The default value for the flag is true, it's only explicitly persisted
       // when it's false. We are putting 0 as the value here to signal false
@@ -471,6 +477,11 @@ const char* VersionEdit::DecodeNewFile4From(Slice* input) {
         case kTailSize:
           if (!GetVarint64(&field, &f.tail_size)) {
             return "invalid tail start offset";
+          }
+          break;
+        case kFilterSize:
+          if (!GetVarint64(&field, &f.filter_size)) {
+            return "invalid filter size";
           }
           break;
         case kUserDefinedTimestampsPersisted:

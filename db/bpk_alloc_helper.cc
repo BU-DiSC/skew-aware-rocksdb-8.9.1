@@ -450,7 +450,7 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
 
 bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
     const FileMetaData& meta, uint64_t num_entries_in_output_level,
-    double* bits_per_key) {
+    double* bits_per_key, bool is_last_level) {
   if (bpk_alloc_type_ == BitsPerKeyAllocationType::kDefaultBpkAlloc)
     return false;
   assert(bits_per_key);
@@ -460,6 +460,13 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
   }
   uint64_t num_entries = meta.num_entries - meta.num_range_deletions;
   double tmp_bits_per_key = overall_bits_per_key_;
+  uint64_t old_total_bits = vstorage_->GetCurrentTotalFilterSize() * 8 -
+                            num_bits_for_filter_to_be_removed_;
+  if (old_total_bits > vstorage_->GetSkippedFilterSize() * 8) {
+    old_total_bits -= vstorage_->GetSkippedFilterSize() * 8;
+  }
+  uint64_t old_total_entries =
+      vstorage_->GetCurrentTotalNumEntries() - num_entries_in_compaction_;
   if (bpk_alloc_type_ == BitsPerKeyAllocationType::kDynamicMonkeyBpkAlloc ||
       (bpk_alloc_type_ == BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc &&
        vstorage_->GetAccumulatedNumPointReads() == 0)) {
@@ -494,7 +501,14 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
             ioptions_->point_read_learning_rate);
 
     uint64_t num_point_reads = est_num_point_reads.first;
-    if (num_point_reads == 0) return false;
+    if (num_point_reads == 0) {
+      if (is_last_level) {
+        *bits_per_key = 0;
+        return true;
+      } else {
+        return false;
+      }
+    }
     uint64_t num_existing_point_reads = est_num_point_reads.second;
 
     if (!bpk_optimization_prepared_flag_) {
@@ -535,15 +549,7 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
   }
 
   tmp_bits_per_key = std::min(tmp_bits_per_key, max_bits_per_key_);
-  uint64_t old_total_bits = vstorage_->GetCurrentTotalFilterSize() * 8 -
-                            num_bits_for_filter_to_be_removed_;
-  if (old_total_bits > vstorage_->GetSkippedFilterSize() * 8) {
-    old_total_bits -= vstorage_->GetSkippedFilterSize() * 8;
-  }
-  uint64_t old_total_entries =
-      vstorage_->GetCurrentTotalNumEntries() - num_entries_in_compaction_;
   const double overused_percentage = 0.2;
-  std::string stats_log = "";
   if (old_total_entries == 0 ||
       old_total_bits > old_total_entries * overall_bits_per_key_ *
                            (1 + overused_percentage)) {
@@ -565,6 +571,8 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
                        num_entries;
   }
   *bits_per_key = tmp_bits_per_key;
+  avg_curr_bits_per_key = (old_total_bits + tmp_bits_per_key * num_entries) *
+                          1.0 / (old_total_entries + num_entries);
   return true;
 }
 

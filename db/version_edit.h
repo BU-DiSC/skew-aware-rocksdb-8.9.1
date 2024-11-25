@@ -97,6 +97,7 @@ enum NewFileCustomTag : uint32_t {
   kUserDefinedTimestampsPersisted = 16,
   kFileNumPointReads = 17,
   kFileNumExistingPointReads = 18,
+  kFilterSize = 19,
   // If this bit for the custom tag is set, opening DB should fail if
   // we don't know this field.
   kCustomTagNonSafeIgnoreMask = 1 << 6,
@@ -268,13 +269,12 @@ struct FileSampledStats {
   std::pair<uint64_t, uint64_t> GetEstimatedNumPointReads(
       uint64_t current_global_point_read_number, double learning_rate,
       int est_interval = -1, uint64_t min_num_point_reads = 0) const {
-    uint64_t est_num_point_reads = 0;
     uint64_t origin_num_point_reads =
         num_point_reads.load(std::memory_order_relaxed);
-    uint64_t origin_num_existing_reads =
-        num_existing_point_reads.load(std::memory_order_relaxed);
-    est_num_point_reads =
+    uint64_t min_est_num_point_reads =
         origin_num_point_reads + global_point_read_number_window.size();
+    uint64_t est_num_point_reads = min_est_num_point_reads;
+    uint64_t min_est_num_point_existing_reads = GetNumExistingPointReads();
     if (est_interval == -1) {
       est_interval =
           GetEstimatedInterval(origin_num_point_reads,
@@ -323,8 +323,8 @@ struct FileSampledStats {
       est_num_point_reads =
           (round)(current_global_point_read_number * 1.0 / est_interval);
     }
-    est_num_point_reads =
-        std::max(est_num_point_reads, min_num_point_reads + GetNumPointReads());
+    est_num_point_reads = std::max(
+        est_num_point_reads, min_num_point_reads + min_est_num_point_reads);
     est_num_point_reads =
         std::min(est_num_point_reads, current_global_point_read_number);
     double est_existing_ratio = 0.0;
@@ -337,23 +337,16 @@ struct FileSampledStats {
           point_read_result_in_window &
           ((0x1 << global_point_read_number_window.size()) - 1));
     }
-    if (!global_point_read_number_window.empty() &&
-        origin_num_point_reads != 0) {
-      est_existing_ratio = learning_rate * num_existing_point_reads_in_window /
-                               global_point_read_number_window.size() +
-                           (1.0 - learning_rate) * origin_num_existing_reads /
-                               origin_num_point_reads;
-    } else if (origin_num_point_reads != 0) {
-      est_existing_ratio =
-          origin_num_existing_reads * 1.0 / origin_num_point_reads;
-    } else if (!global_point_read_number_window.empty()) {
+    if (!global_point_read_number_window.empty()) {
       est_existing_ratio = num_existing_point_reads_in_window * 1.0 /
                            global_point_read_number_window.size();
     }
-    return std::make_pair(
-        est_num_point_reads,
-        std::min((uint64_t)round(est_existing_ratio * est_num_point_reads),
-                 est_num_point_reads));
+    uint64_t est_num_existing_point_reads =
+        (uint64_t)round(
+            est_existing_ratio *
+            (est_num_point_reads - min_est_num_point_existing_reads)) +
+        min_est_num_point_existing_reads;
+    return std::make_pair(est_num_point_reads, est_num_existing_point_reads);
   }
 };
 

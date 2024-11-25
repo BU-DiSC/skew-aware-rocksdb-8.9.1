@@ -357,19 +357,21 @@ Status BuildTable(
         if (!bpk_alloc_helper.no_filter_optimize_for_level0_ &&
             bpk_alloc_helper.IfNeedAllocateBitsPerKey(*meta, *num_input_entries,
                                                       &new_bits_per_key)) {
-          builder->ResetFilterBitsPerKey(new_bits_per_key);
+          builder->ResetFilterBitsPerKey(&new_bits_per_key);
           meta->bpk = new_bits_per_key;
           ROCKS_LOG_INFO(ioptions.info_log,
                          "[%s] Flushes generates new file %" PRIu64
-                         " with reset bits-per-key %.4f",
+                         " with reset bits-per-key %.4f / %.4f",
                          tboptions.column_family_name.c_str(),
-                         meta->fd.GetNumber(), new_bits_per_key);
+                         meta->fd.GetNumber(), new_bits_per_key,
+                         bpk_alloc_helper.avg_curr_bits_per_key);
         } else {
           ROCKS_LOG_INFO(ioptions.info_log,
                          "[%s] Flushes generates new file %" PRIu64
-                         " with no reset bits-per-key",
+                         " with no reset bits-per-key / %.4f",
                          tboptions.column_family_name.c_str(),
-                         meta->fd.GetNumber());
+                         meta->fd.GetNumber(),
+                         bpk_alloc_helper.avg_curr_bits_per_key);
         }
         version->storage_info()->SetBpkCommonConstant(
             bpk_alloc_helper.bpk_alloc_type_,

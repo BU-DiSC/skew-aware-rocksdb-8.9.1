@@ -28,8 +28,10 @@ class BitsPerKeyAllocHelper {
   // *bitis_per_key)
   bool IfNeedAllocateBitsPerKey(const FileMetaData& meta,
                                 uint64_t num_entries_in_output_level,
-                                double* bits_per_key);
+                                double* bits_per_key,
+                                bool is_last_level = false);
 
+  double avg_curr_bits_per_key = 0.0;
   const ImmutableOptions* ioptions_;
   const VersionStorageInfo* vstorage_;
   BitsPerKeyAllocationType bpk_alloc_type_ =

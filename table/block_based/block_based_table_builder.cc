@@ -2186,13 +2186,16 @@ bool BlockBasedTableBuilder::IsEmpty() const {
   return rep_->props.num_entries == 0 && rep_->props.num_range_deletions == 0;
 }
 
-void BlockBasedTableBuilder::ResetFilterBitsPerKey(double bits_per_key) {
+void BlockBasedTableBuilder::ResetFilterBitsPerKey(double* bits_per_key) {
+  if (bits_per_key == NULL) return;
   if (!rep_->table_options.modular_filters &&
       (rep_->filter_builder == nullptr || rep_->filter_builder->IsEmpty())) {
+    *bits_per_key = 0;
     // No filter block needed
     return;
   }
-  if (bits_per_key < 1.0 && rep_->filter_builder) {
+  if (*bits_per_key < 1.0 && rep_->filter_builder) {
+    *bits_per_key = 0;
     return;
   }
   if (rep_->table_options.modular_filters) {
@@ -2200,24 +2203,26 @@ void BlockBasedTableBuilder::ResetFilterBitsPerKey(double bits_per_key) {
     double max_bits_per_key_granularity =
         rep_->table_options.max_bits_per_key_granularity;
     double next_bits_per_key;
-    while (bits_per_key > 0) {
+    double curr_bits_per_key = *bits_per_key;
+    while (curr_bits_per_key > 0) {
       // avoid fragmented bits-per-key
       next_bits_per_key = max_bits_per_key_granularity;
-      if ((next_bits_per_key > bits_per_key) ||
-          (next_bits_per_key < bits_per_key &&
-           next_bits_per_key + 1 > bits_per_key)) {
-        next_bits_per_key = bits_per_key;
+      if ((next_bits_per_key > curr_bits_per_key) ||
+          (next_bits_per_key < curr_bits_per_key &&
+           next_bits_per_key + 1 >= curr_bits_per_key)) {
+        next_bits_per_key = curr_bits_per_key;
       }
       rep_->modular_filter_builders[modular_filter_index]
           ->ResetFilterBitsPerKey(next_bits_per_key);
-      bits_per_key -= next_bits_per_key;
+      curr_bits_per_key -= next_bits_per_key;
       modular_filter_index++;
 
       // ignore more bits-per-key if the maximum number of modulars is reached
       if (rep_->modular_filter_builders.size() <= modular_filter_index) {
-        bits_per_key = 0;
+        break;
       }
     }
+    *bits_per_key = *bits_per_key - curr_bits_per_key;
     rep_->props.num_modules_for_modular_filters = modular_filter_index;
     for (size_t i = modular_filter_index;
          i < rep_->modular_filter_builders.size(); i++) {
@@ -2225,7 +2230,7 @@ void BlockBasedTableBuilder::ResetFilterBitsPerKey(double bits_per_key) {
     }
 
   } else {
-    rep_->filter_builder->ResetFilterBitsPerKey(bits_per_key);
+    rep_->filter_builder->ResetFilterBitsPerKey(*bits_per_key);
   }
 }
 
