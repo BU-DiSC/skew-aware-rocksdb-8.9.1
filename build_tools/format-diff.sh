@@ -116,7 +116,8 @@ fi
 #     ln -s `git rev-parse --show-toplevel`/build_tools/format-diff.sh $PRE_COMMIT_SCRIPT_PATH
 #   fi
 # fi
-set -e
+#set -e
+set -f
 
 uncommitted_code=`git diff HEAD`
 
