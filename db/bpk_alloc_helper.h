@@ -16,7 +16,8 @@ class BitsPerKeyAllocHelper {
   explicit BitsPerKeyAllocHelper(const ImmutableOptions* immutable_options,
                                  const VersionStorageInfo* vstorage)
       : ioptions_(immutable_options), vstorage_(vstorage) {
-    bpk_optimization_prepared_flag_ = false;
+    mnemosyne_bpk_optimization_prepared_flag_ = false;
+    mnemosyne_plus_bpk_optimization_prepared_flag_ = false;
     num_bits_for_filter_to_be_removed_ = 0;
     num_entries_in_compaction_ = 0;
   }
@@ -29,33 +30,45 @@ class BitsPerKeyAllocHelper {
   bool IfNeedAllocateBitsPerKey(const FileMetaData& meta,
                                 uint64_t num_entries_in_output_level,
                                 double* bits_per_key,
-                                bool is_last_level = false);
+                                bool is_last_level = false,
+                                const Compaction* compaction = nullptr);
+  // pre-process the statistics to prepare Mnemosyne-based bits-per-key
+  // allocation
+  void PrepareForMnemosyne(const Compaction* compaction);
+  // pre-process the statistics to prepare Mnemosyne-plus-based bits-per-key
+  // allocation
+  void PrepareForMnemosynePlus(const Compaction* compaction);
 
   double avg_curr_bits_per_key = 0.0;
+  uint64_t agg_filter_size_ = 0;
+
   const ImmutableOptions* ioptions_;
   const VersionStorageInfo* vstorage_;
   BitsPerKeyAllocationType bpk_alloc_type_ =
       BitsPerKeyAllocationType::kDefaultBpkAlloc;
   bool flush_flag_ = false;
   double naive_monkey_bpk = 0.0;
-  bool bpk_optimization_prepared_flag_ = false;
+  bool mnemosyne_bpk_optimization_prepared_flag_ = false;
+  bool mnemosyne_plus_bpk_optimization_prepared_flag_ = false;
   bool no_filter_optimize_for_level0_ = false;
-  double workload_aware_bpk_weight_threshold_ =
+  double mnemosyne_plus_bpk_weight_threshold_ =
       std::numeric_limits<double>::max();
-  uint64_t dynamic_monkey_bpk_num_entries_threshold_ =
+  uint64_t mnemosyne_bpk_num_entries_threshold_ =
       std::numeric_limits<uint64_t>::max();
-  uint64_t dynamic_monkey_num_entries_ = 0;
-  uint64_t workload_aware_num_entries_ = 0;
-  uint64_t workload_aware_num_entries_with_empty_queries_ = 0;
-  double temp_sum_in_bpk_optimization_ = 0;
-  double common_constant_in_bpk_optimization_ = 0;
-  uint64_t total_empty_queries_ = 0;
+  uint64_t mnemosyne_num_entries_ = 0;
+  uint64_t mnemosyne_plus_num_entries_ = 0;
+  uint64_t mnemosyne_plus_num_entries_with_empty_queries_ = 0;
+  double mnemosyne_plus_temp_sum_in_bpk_optimization_ = 0;
+  double mnemosyne_plus_common_constant_in_bpk_optimization_ = 0;
+  uint64_t mnemosyne_plus_total_empty_queries_ = 0;
   double total_bits_for_filter_ = 0.0;
 
   double overall_bits_per_key_ = 0.0;
   uint64_t num_entries_in_compaction_ = 0;
   uint64_t num_bits_for_filter_to_be_removed_ = 0;
 
+  double mnemosyne_temp_sum_in_bpk_optimization_ = 0;
+  double mnemosyne_common_constant_in_bpk_optimization_ = 0;
   double max_bits_per_key_ = 100;
   struct LevelState {
     int level;
@@ -90,7 +103,7 @@ class BitsPerKeyAllocHelper {
       }
     };
   };
-  // used by kMonkey
+  // used by kMnemosyne
   std::priority_queue<LevelState> level_states_pq_;
 
   struct FileWorkloadState {
@@ -113,7 +126,7 @@ class BitsPerKeyAllocHelper {
       return weight < tmp.weight;
     }
   };
-  // used by kWorkloadAware
+  // used by kMnemosynePlus
   std::priority_queue<FileWorkloadState> file_workload_state_pq_;
 };
 

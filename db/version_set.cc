@@ -2251,6 +2251,7 @@ VersionStorageInfo::VersionStorageInfo(
       accumulated_num_empty_point_reads_by_file_(0),
       point_reads_num_when_last_flush_(0),
       num_flushes_(0),
+      current_total_filter_size_(0),
       bits_per_key_alloc_type_(BitsPerKeyAllocationType::kDefaultBpkAlloc),
       common_constant_in_bpk_optimization_(0),
       accumulated_file_size_(0),
@@ -2267,8 +2268,7 @@ VersionStorageInfo::VersionStorageInfo(
       finalized_(false),
       force_consistency_checks_(_force_consistency_checks),
       epoch_number_requirement_(epoch_number_requirement),
-      offpeak_time_option_(std::move(offpeak_time_option)),
-      current_total_filter_size_(0) {
+      offpeak_time_option_(std::move(offpeak_time_option)) {
   if (ref_vstorage != nullptr) {
     accumulated_num_point_reads_.store(
         ref_vstorage->accumulated_num_point_reads_.load(
@@ -2297,12 +2297,15 @@ VersionStorageInfo::VersionStorageInfo(
     accumulated_num_non_deletions_ =
         ref_vstorage->accumulated_num_non_deletions_;
     accumulated_num_deletions_ = ref_vstorage->accumulated_num_deletions_;
-    skipped_filter_size_ = ref_vstorage->GetSkippedFilterSize();
+    // skipped_filter_size_ = ref_vstorage->GetSkippedFilterSize();
     current_num_non_deletions_ = ref_vstorage->current_num_non_deletions_;
     current_num_deletions_ = ref_vstorage->current_num_deletions_;
     current_num_samples_ = ref_vstorage->current_num_samples_;
     oldest_snapshot_seqnum_ = ref_vstorage->oldest_snapshot_seqnum_;
-    current_total_filter_size_ = ref_vstorage->current_total_filter_size_;
+    current_total_filter_size_.store(
+        ref_vstorage->current_total_filter_size_.load(
+            std::memory_order_relaxed));
+    ;
     compact_cursor_ = ref_vstorage->compact_cursor_;
     compact_cursor_.resize(num_levels_);
   }
@@ -3325,11 +3328,11 @@ bool Version::IsFilterSkipped(int level, bool is_file_last_in_level,
     if (max_accessed_modulars) *max_accessed_modulars = max_modulars_;
     return false;
   } else if (storage_info_.GetBitsPerKeyAllocationType() ==
-             BitsPerKeyAllocationType::kDynamicMonkeyBpkAlloc) {
+             BitsPerKeyAllocationType::kMnemosyneBpkAlloc) {
     if (max_accessed_modulars) *max_accessed_modulars = max_modulars_;
-    return storage_info_.IsFilterSkippedWithEmptyBpkInDynamicMonkey(level);
+    return storage_info_.IsFilterSkippedWithEmptyBpkInMnemosyne(level);
   } else if (storage_info_.GetBitsPerKeyAllocationType() ==
-             BitsPerKeyAllocationType::kWorkloadAwareBpkAlloc) {
+             BitsPerKeyAllocationType::kMnemosynePlusBpkAlloc) {
     *max_accessed_modulars = 0;
     uint64_t current_global_point_read_number =
         storage_info_.GetAccumulatedNumPointReads();
@@ -3545,7 +3548,13 @@ void VersionStorageInfo::UpdateAccumulatedStats(FileMetaData* file_meta) {
       file_meta->num_entries - file_meta->num_deletions;
   current_num_deletions_ += file_meta->num_deletions;
   current_num_samples_++;
-  current_total_filter_size_ += file_meta->filter_size;
+  // uint64_t temp_num_point_reads = file_meta->stats.GetNumPointReads();
+  // uint64_t temp_num_existing_point_reads =
+  // file_meta->stats.GetNumExistingPointReads(); if (temp_num_point_reads == 0
+  // || (temp_num_point_reads > 0 && temp_num_point_reads >
+  // temp_num_existing_point_reads)) {
+  //   current_total_filter_size_ += file_meta->filter_size;
+  // }
 }
 
 void VersionStorageInfo::RemoveCurrentStats(FileMetaData* file_meta) {
@@ -3554,9 +3563,15 @@ void VersionStorageInfo::RemoveCurrentStats(FileMetaData* file_meta) {
         file_meta->num_entries - file_meta->num_deletions;
     current_num_deletions_ -= file_meta->num_deletions;
     current_num_samples_--;
-    if (current_total_filter_size_ >= file_meta->filter_size) {
-      current_total_filter_size_ -= file_meta->filter_size;
-    }
+    // if (current_total_filter_size_ >= file_meta->filter_size) {
+    //   uint64_t temp_num_point_reads = file_meta->stats.GetNumPointReads();
+    //   uint64_t temp_num_existing_point_reads =
+    //   file_meta->stats.GetNumExistingPointReads(); if (temp_num_point_reads
+    //   == 0 || (temp_num_point_reads > 0 && temp_num_point_reads >
+    //   temp_num_existing_point_reads)) {
+    //     current_total_filter_size_ -= file_meta->filter_size;
+    //   }
+    // }
   }
 }
 

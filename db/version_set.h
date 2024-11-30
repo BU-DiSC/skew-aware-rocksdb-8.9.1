@@ -212,8 +212,13 @@ class VersionStorageInfo {
     num_flushes_++;
   }
 
-  void UpdateSkippedFilterSize(uint64_t _skipped_filter_size) const {
-    skipped_filter_size_.store(_skipped_filter_size, std::memory_order_relaxed);
+  // void UpdateSkippedFilterSize(uint64_t _skipped_filter_size) const {
+  //   skipped_filter_size_.store(_skipped_filter_size,
+  //   std::memory_order_relaxed);
+  // }
+  void UpdateCurrentTotalFilterSize(uint64_t _current_total_filter_size) const {
+    current_total_filter_size_.store(_current_total_filter_size,
+                                     std::memory_order_relaxed);
   }
 
   void UpdateNumEmptyPointReads(
@@ -694,12 +699,12 @@ class VersionStorageInfo {
     return common_constant_in_bpk_optimization_;
   }
 
-  void SetLevelIDsWithEmptyBpkInDynamicMonkey(
+  void SetLevelIDsWithEmptyBpkInMnemosyne(
       const std::unordered_set<size_t>& _levelIDs_with_bpk0_in_monkey) const {
     levelIDs_with_bpk0_in_monkey_ = _levelIDs_with_bpk0_in_monkey;
   }
 
-  bool IsFilterSkippedWithEmptyBpkInDynamicMonkey(size_t level) const {
+  bool IsFilterSkippedWithEmptyBpkInMnemosyne(size_t level) const {
     return levelIDs_with_bpk0_in_monkey_.find(level) !=
            levelIDs_with_bpk0_in_monkey_.end();
   }
@@ -718,9 +723,9 @@ class VersionStorageInfo {
     return current_total_filter_size_;
   }
 
-  uint64_t GetSkippedFilterSize() const {
-    return skipped_filter_size_.load(std::memory_order_relaxed);
-  }
+  // uint64_t GetSkippedFilterSize() const {
+  //   return skipped_filter_size_.load(std::memory_order_relaxed);
+  // }
 
   uint64_t GetCurrentTotalNumEntries() const {
     return current_num_deletions_ + current_num_non_deletions_;
@@ -857,7 +862,8 @@ class VersionStorageInfo {
   mutable std::atomic<uint64_t> accumulated_num_empty_point_reads_by_file_;
   mutable uint64_t point_reads_num_when_last_flush_ = 0;
   mutable std::atomic<uint64_t> num_flushes_ = 0;
-  mutable std::atomic<uint64_t> skipped_filter_size_ = 0;
+  // mutable std::atomic<uint64_t> skipped_filter_size_ = 0;
+  mutable std::atomic<uint64_t> current_total_filter_size_ = 0;
   mutable std::thread::id leader_thread_id_;
   mutable std::mutex thread_ids_mutex_;
 
@@ -903,7 +909,6 @@ class VersionStorageInfo {
 
   OffpeakTimeOption offpeak_time_option_;
 
-  uint64_t current_total_filter_size_;
 
   friend class Version;
   friend class VersionSet;
