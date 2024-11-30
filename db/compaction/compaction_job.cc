@@ -638,7 +638,7 @@ Status CompactionJob::Run() {
     bpk_alloc_helper_->PrepareBpkAllocation(compact_->compaction);
     compact_->compaction->input_vstorage()->SetBpkCommonConstant(
         bpk_alloc_helper_->bpk_alloc_type_,
-        bpk_alloc_helper_->common_constant_in_bpk_optimization_);
+        bpk_alloc_helper_->mnemosyne_plus_common_constant_in_bpk_optimization_);
   }
 
   // Launch a thread for each of subcompactions 1...num_threads-1

@@ -129,8 +129,9 @@ struct CacheUsageOptions {
 enum BitsPerKeyAllocationType : char {
   kDefaultBpkAlloc = 0x1,
   kNaiveMonkeyBpkAlloc = 0x2,
-  kDynamicMonkeyBpkAlloc = 0x3,
-  kWorkloadAwareBpkAlloc = 0x4,
+  kMnemosyneBpkAlloc = 0x3,
+  // MnemosynePlus: workload-aware allocation, requires accurate statistics
+  kMnemosynePlusBpkAlloc = 0x4,
 };
 
 struct HashDigest {

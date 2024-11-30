@@ -375,7 +375,8 @@ Status BuildTable(
         }
         version->storage_info()->SetBpkCommonConstant(
             bpk_alloc_helper.bpk_alloc_type_,
-            bpk_alloc_helper.common_constant_in_bpk_optimization_);
+            bpk_alloc_helper
+                .mnemosyne_plus_common_constant_in_bpk_optimization_);
         if (ioptions.point_reads_track_method == kDynamicCompactionAwareTrack) {
           // adjusted to the estimated number of point reads that may be tracked
           // when it is as an SST file
