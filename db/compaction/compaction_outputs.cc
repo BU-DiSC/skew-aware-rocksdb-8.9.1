@@ -32,6 +32,7 @@ Status CompactionOutputs::Finish(
   Status s = intput_status;
   uint64_t min_num_point_reads = 0;
   uint64_t num_point_reads = 0;
+  double new_bits_per_key = 0.0;
   if (s.ok()) {
     std::string seqno_to_time_mapping_str;
     seqno_to_time_mapping.Encode(
@@ -75,7 +76,6 @@ Status CompactionOutputs::Finish(
       file_existing_point_read_inc(
           meta, compaction_->GetAvgNumExistingPointReadsWithNaiiveTrack());
     }
-    double new_bits_per_key = 0.0;
     bool reset_flag = false;
     if (bpk_alloc_helper_ != nullptr) {
       reset_flag = bpk_alloc_helper_->IfNeedAllocateBitsPerKey(
@@ -85,37 +85,10 @@ Status CompactionOutputs::Finish(
     }
 
     if (reset_flag) {
-      double origin_bits_per_key = new_bits_per_key;
       builder_->ResetFilterBitsPerKey(&new_bits_per_key);
       meta->bpk = new_bits_per_key;
-      ROCKS_LOG_INFO(
-          compaction_->immutable_options()->info_log,
-          "[%s] Compaction generates new file %" PRIu64
-          " in level %d"
-          " (num_point_reads=%" PRIu64 ", num_existing_point_reads=%" PRIu64
-          " , min_num_point_reads=%" PRIu64
-          ", num_entries_from_upper_level=%" PRIu64
-          ") with reset bits-per-key %.4f / %.4f / %.4f",
-          compaction_->column_family_data()->GetName().c_str(),
-          meta->fd.GetNumber(), compaction_->output_level(),
-          meta->stats.num_point_reads.load(std::memory_order_relaxed),
-          meta->stats.num_existing_point_reads.load(std::memory_order_relaxed),
-          min_num_point_reads,
-          current_output().agg_num_entries_from_upper_level, new_bits_per_key,
-          bpk_alloc_helper_->avg_curr_bits_per_key, origin_bits_per_key);
     } else {
-      ROCKS_LOG_INFO(
-          compaction_->immutable_options()->info_log,
-          "[%s] Compaction generates new file %" PRIu64
-          " in level %d"
-          " (num_point_reads=%" PRIu64 ", num_existing_point_reads=%" PRIu64
-          " , min_num_point_reads=%" PRIu64
-          ") with no reset bits-per-key / %.4f",
-          compaction_->column_family_data()->GetName().c_str(),
-          meta->fd.GetNumber(), compaction_->output_level(),
-          meta->stats.num_point_reads.load(std::memory_order_relaxed),
-          meta->stats.num_existing_point_reads.load(std::memory_order_relaxed),
-          min_num_point_reads, bpk_alloc_helper_->avg_curr_bits_per_key);
+      new_bits_per_key = bpk_alloc_helper_->overall_bits_per_key_;
     }
 
     s = builder_->Finish();
@@ -137,6 +110,25 @@ Status CompactionOutputs::Finish(
     meta->user_defined_timestamps_persisted = static_cast<bool>(
         builder_->GetTableProperties().user_defined_timestamps_persisted);
     meta->filter_size = builder_->GetTableProperties().filter_size;
+
+    bpk_alloc_helper_->UpdateAggStatistics(meta);
+
+    ROCKS_LOG_INFO(
+        compaction_->immutable_options()->info_log,
+        "[%s] Compaction generates new file %" PRIu64
+        " in level %d"
+        " (num_point_reads=%" PRIu64 ", num_existing_point_reads=%" PRIu64
+        " , min_num_point_reads=%" PRIu64
+        ", num_entries_from_upper_level=%" PRIu64
+        ") with reset bits-per-key %.4f / %.4f / %" PRIu64 " / %.4f",
+        compaction_->column_family_data()->GetName().c_str(),
+        meta->fd.GetNumber(), compaction_->output_level(),
+        meta->stats.num_point_reads.load(std::memory_order_relaxed),
+        meta->stats.num_existing_point_reads.load(std::memory_order_relaxed),
+        min_num_point_reads, current_output().agg_num_entries_from_upper_level,
+        new_bits_per_key, bpk_alloc_helper_->avg_curr_bits_per_key,
+        bpk_alloc_helper_->agg_filter_size_,
+        bpk_alloc_helper_->mnemosyne_plus_common_constant_in_bpk_optimization_);
   }
   current_output().finished = true;
   stats_.bytes_written += current_bytes;

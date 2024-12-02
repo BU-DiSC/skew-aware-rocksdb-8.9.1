@@ -3548,6 +3548,7 @@ void VersionStorageInfo::UpdateAccumulatedStats(FileMetaData* file_meta) {
       file_meta->num_entries - file_meta->num_deletions;
   current_num_deletions_ += file_meta->num_deletions;
   current_num_samples_++;
+  current_total_filter_size_ += file_meta->filter_size;
   // uint64_t temp_num_point_reads = file_meta->stats.GetNumPointReads();
   // uint64_t temp_num_existing_point_reads =
   // file_meta->stats.GetNumExistingPointReads(); if (temp_num_point_reads == 0
@@ -3563,6 +3564,11 @@ void VersionStorageInfo::RemoveCurrentStats(FileMetaData* file_meta) {
         file_meta->num_entries - file_meta->num_deletions;
     current_num_deletions_ -= file_meta->num_deletions;
     current_num_samples_--;
+    if (current_total_filter_size_ < file_meta->filter_size) {
+      current_total_filter_size_.store(0, std::memory_order_relaxed);
+    } else {
+      current_total_filter_size_ -= file_meta->filter_size;
+    }
     // if (current_total_filter_size_ >= file_meta->filter_size) {
     //   uint64_t temp_num_point_reads = file_meta->stats.GetNumPointReads();
     //   uint64_t temp_num_existing_point_reads =

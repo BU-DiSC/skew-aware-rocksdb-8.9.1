@@ -4,43 +4,21 @@
 #include <memory>
 #include <unordered_map>
 
-#include "table/block_based/block_based_table_factory.h"
-#include "table/block_based/filter_policy_internal.h"
 
 namespace ROCKSDB_NAMESPACE {
 
 const double log_2_squared = std::pow(std::log(2), 2);
 
 void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
-  if (ioptions_ == nullptr || vstorage_ == nullptr) return;
-
-  if (ioptions_->table_factory == nullptr ||
-      strcmp(ioptions_->table_factory->Name(),
-             TableFactory::kBlockBasedTableName()) != 0)
-    return;
-  const BlockBasedTableOptions tbo =
-      std::static_pointer_cast<BlockBasedTableFactory>(ioptions_->table_factory)
-          ->GetBlockBasedTableOptions();
-  if (tbo.modular_filters) {
-    max_bits_per_key_ =
-        tbo.max_modulars * tbo.max_bits_per_key_granularity + 1.0;
-  }
-  if (tbo.filter_policy == nullptr) return;
-  overall_bits_per_key_ =
-      std::static_pointer_cast<const BloomLikeFilterPolicy>(tbo.filter_policy)
-          ->GetBitsPerKey();
-  if (overall_bits_per_key_ == 0.0) return;
-  bpk_alloc_type_ = tbo.bpk_alloc_type;
-  no_filter_optimize_for_level0_ = tbo.no_filter_optimize_for_level0;
-
   if (bpk_alloc_type_ == BitsPerKeyAllocationType::kDefaultBpkAlloc) return;
   if (bpk_alloc_type_ == BitsPerKeyAllocationType::kNaiveMonkeyBpkAlloc) {
+    if (naive_monkey_bpk_list == NULL) return;
     int output_level = 0;
     if (compaction != NULL) {
       output_level = compaction->output_level();
     }
-    if (output_level < (int)tbo.naive_monkey_bpk_list.size()) {
-      naive_monkey_bpk = tbo.naive_monkey_bpk_list[output_level];
+    if (output_level < (int)naive_monkey_bpk_list->size()) {
+      naive_monkey_bpk = naive_monkey_bpk_list->at(output_level);
     } else {
       naive_monkey_bpk = overall_bits_per_key_;
     }
@@ -58,7 +36,7 @@ void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
     if (mnemosyne_plus_bpk_optimization_prepared_flag_) return;
     PrepareForMnemosynePlus(compaction);
   }
-
+  total_num_entries_ = vstorage_->GetCurrentTotalNumEntries();
   vstorage_->UpdateNumEmptyPointReads(mnemosyne_plus_total_empty_queries_);
   vstorage_->UpdateCurrentTotalFilterSize(agg_filter_size_);
 }
@@ -137,6 +115,7 @@ void BitsPerKeyAllocHelper::PrepareForMnemosyne(const Compaction* compaction) {
   uint64_t tmp_num_entries_in_filter_by_file = 0;
   for (int level = start_level; level < vstorage_->num_levels(); ++level) {
     num_entries_in_filter_by_level = 0;
+    tmp_agg_filter_size = 0;
     for (auto* file_meta : vstorage_->LevelFiles(level)) {
       tmp_num_entries_in_filter_by_file =
           file_meta->num_entries - file_meta->num_range_deletions;
@@ -189,6 +168,8 @@ void BitsPerKeyAllocHelper::PrepareForMnemosyne(const Compaction* compaction) {
     agg_filter_size_ += tmp_agg_filter_size;
     mnemosyne_num_entries_ += num_entries_in_filter_by_level;
   }
+
+  if (mnemosyne_num_entries_ == 0) return;
   if (added_entries_in_max_level > 0 && max_level == 0 &&
       !no_filter_optimize_for_level0_) {
     level_states_pq_.push(
@@ -277,12 +258,17 @@ void BitsPerKeyAllocHelper::PrepareForMnemosynePlus(
         fileID_in_compaction.insert(meta->fd.GetNumber());
         num_entries_in_bf = meta->num_entries - meta->num_range_deletions;
         num_entries_in_compaction_ += num_entries_in_bf;
-        if (meta->bpk != -1) {
-          num_bits_for_filter_to_be_removed_ += meta->filter_size;
-        } else {
-          num_bits_for_filter_to_be_removed_ +=
-              num_entries_in_bf * overall_bits_per_key_;
+
+        if (est_num_point_reads.first > est_num_point_reads.second ||
+            est_num_point_reads.first == 0) {
+          if (meta->bpk != -1) {
+            num_bits_for_filter_to_be_removed_ += meta->filter_size * 8;
+          } else {
+            num_bits_for_filter_to_be_removed_ +=
+                num_entries_in_bf * overall_bits_per_key_;
+          }
         }
+
         if (est_num_point_reads.first == 0) continue;
 
         if (level == 0) {
@@ -454,13 +440,7 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
   }
   uint64_t num_entries = meta.num_entries - meta.num_range_deletions;
   double tmp_bits_per_key = overall_bits_per_key_;
-  uint64_t old_total_bits = vstorage_->GetCurrentTotalFilterSize() * 8 -
-                            num_bits_for_filter_to_be_removed_;
-  // if (old_total_bits > vstorage_->GetSkippedFilterSize() * 8) {
-  //   old_total_bits -= vstorage_->GetSkippedFilterSize() * 8;
-  // }
-  uint64_t old_total_entries =
-      vstorage_->GetCurrentTotalNumEntries() - num_entries_in_compaction_;
+  double weight = 0.0;
   if (bpk_alloc_type_ == BitsPerKeyAllocationType::kMnemosyneBpkAlloc ||
       (bpk_alloc_type_ == BitsPerKeyAllocationType::kMnemosynePlusBpkAlloc &&
        vstorage_->GetAccumulatedNumPointReads() == 0)) {
@@ -541,8 +521,7 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
       return true;
     }
 
-    double weight =
-        num_entries * 1.0 / (num_point_reads - num_existing_point_reads);
+    weight = num_entries * 1.0 / (num_point_reads - num_existing_point_reads);
     // for bits-per-key < 1, give it 1 if it is larger than or equal to 0.5
     if (/*weight > mnemosyne_plus_bpk_weight_threshold_ ||*/
         std::log(weight * mnemosyne_plus_total_empty_queries_) +
@@ -558,7 +537,20 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
     }
   }
 
-  tmp_bits_per_key = std::min(tmp_bits_per_key, max_bits_per_key_);
+  // tmp_bits_per_key = std::min(tmp_bits_per_key, max_bits_per_key_);
+  if (tmp_bits_per_key > max_bits_per_key_) {
+    tmp_bits_per_key = max_bits_per_key_;
+    mnemosyne_plus_common_constant_in_bpk_optimization_ =
+        -(tmp_bits_per_key * log_2_squared) -
+        std::log(weight * mnemosyne_plus_total_empty_queries_);
+  }
+
+  uint64_t old_total_bits =
+      agg_filter_size_ * 8 - num_bits_for_filter_to_be_removed_;
+  // if (old_total_bits > vstorage_->GetSkippedFilterSize() * 8) {
+  //   old_total_bits -= vstorage_->GetSkippedFilterSize() * 8;
+  // }
+  uint64_t old_total_entries = total_num_entries_ - num_entries_in_compaction_;
   const double overused_percentage = 0.2;
   if (old_total_entries == 0 ||
       old_total_bits > old_total_entries * overall_bits_per_key_ *
@@ -584,6 +576,23 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
   avg_curr_bits_per_key = (old_total_bits + tmp_bits_per_key * num_entries) *
                           1.0 / (old_total_entries + num_entries);
   return true;
+}
+
+void BitsPerKeyAllocHelper::UpdateAggStatistics(FileMetaData* file_meta) {
+  if (file_meta != NULL) {
+    agg_filter_size_ += file_meta->filter_size;
+    total_num_entries_ +=
+        file_meta->num_entries - file_meta->num_range_deletions;
+    if (total_num_entries_ > num_entries_in_compaction_) {
+      avg_curr_bits_per_key =
+          (agg_filter_size_ * 8 - num_bits_for_filter_to_be_removed_) * 1.0 /
+          (total_num_entries_ - num_entries_in_compaction_);
+    } else {
+      avg_curr_bits_per_key =
+          agg_filter_size_ * 8.0 /
+          (file_meta->num_entries - file_meta->num_range_deletions);
+    }
+  }
 }
 
 };  // namespace ROCKSDB_NAMESPACE

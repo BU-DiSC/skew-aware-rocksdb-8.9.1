@@ -221,6 +221,7 @@ Status BuildTable(
 
     BitsPerKeyAllocHelper bpk_alloc_helper(&tboptions.ioptions,
                                            version->storage_info());
+    double new_bits_per_key = 0.0;
 
     for (; c_iter.Valid(); c_iter.Next()) {
       const Slice& key = c_iter.key();
@@ -316,7 +317,7 @@ Status BuildTable(
               : meta->oldest_ancester_time);
       meta->num_entries = *num_input_entries;
       meta->num_range_deletions = num_unfragmented_tombstones;
-      bpk_alloc_helper.PrepareBpkAllocation();
+      // bpk_alloc_helper.PrepareBpkAllocation();
       if (version) {
         uint64_t temp_num_point_reads = round(agg_num_point_reads);
         if (ioptions.point_reads_track_method == kDynamicCompactionAwareTrack) {
@@ -353,26 +354,15 @@ Status BuildTable(
               agg_num_existing_point_reads));
         }
         meta->bpk = bpk_alloc_helper.overall_bits_per_key_;
-        double new_bits_per_key = 0.0;
         if (!bpk_alloc_helper.no_filter_optimize_for_level0_ &&
             bpk_alloc_helper.IfNeedAllocateBitsPerKey(*meta, *num_input_entries,
                                                       &new_bits_per_key)) {
           builder->ResetFilterBitsPerKey(&new_bits_per_key);
           meta->bpk = new_bits_per_key;
-          ROCKS_LOG_INFO(ioptions.info_log,
-                         "[%s] Flushes generates new file %" PRIu64
-                         " with reset bits-per-key %.4f / %.4f",
-                         tboptions.column_family_name.c_str(),
-                         meta->fd.GetNumber(), new_bits_per_key,
-                         bpk_alloc_helper.avg_curr_bits_per_key);
         } else {
-          ROCKS_LOG_INFO(ioptions.info_log,
-                         "[%s] Flushes generates new file %" PRIu64
-                         " with no reset bits-per-key / %.4f",
-                         tboptions.column_family_name.c_str(),
-                         meta->fd.GetNumber(),
-                         bpk_alloc_helper.avg_curr_bits_per_key);
+          new_bits_per_key = bpk_alloc_helper.overall_bits_per_key_;
         }
+
         version->storage_info()->SetBpkCommonConstant(
             bpk_alloc_helper.bpk_alloc_type_,
             bpk_alloc_helper
@@ -410,6 +400,18 @@ Status BuildTable(
       tp = builder
                ->GetTableProperties();  // refresh now that builder is finished
       meta->filter_size = tp.filter_size;
+
+      bpk_alloc_helper.UpdateAggStatistics(meta);
+
+      ROCKS_LOG_INFO(ioptions.info_log,
+                     "[%s] Flushes generates new file %" PRIu64
+                     " with reset bits-per-key %.4f / %.4f / %" PRIu64
+                     " / %.4f",
+                     tboptions.column_family_name.c_str(), meta->fd.GetNumber(),
+                     new_bits_per_key, bpk_alloc_helper.avg_curr_bits_per_key,
+                     bpk_alloc_helper.agg_filter_size_,
+                     version->storage_info()->GetBitsPerKeyCommonConstant());
+
       if (memtable_payload_bytes != nullptr &&
           memtable_garbage_bytes != nullptr) {
         const CompactionIterationStats& ci_stats = c_iter.iter_stats();

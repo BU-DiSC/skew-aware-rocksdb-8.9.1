@@ -6,6 +6,8 @@
 #include "compaction/compaction.h"
 #include "options/db_options.h"
 #include "rocksdb/table.h"
+#include "table/block_based/block_based_table_factory.h"
+#include "table/block_based/filter_policy_internal.h"
 #include "version_edit.h"
 #include "version_set.h"
 
@@ -20,6 +22,34 @@ class BitsPerKeyAllocHelper {
     mnemosyne_plus_bpk_optimization_prepared_flag_ = false;
     num_bits_for_filter_to_be_removed_ = 0;
     num_entries_in_compaction_ = 0;
+
+    InitializeConfiguration();
+  }
+
+  void InitializeConfiguration() {
+    if (ioptions_ == nullptr || vstorage_ == nullptr) return;
+
+    if (ioptions_->table_factory == nullptr ||
+        strcmp(ioptions_->table_factory->Name(),
+               TableFactory::kBlockBasedTableName()) != 0)
+      return;
+    const BlockBasedTableOptions tbo =
+        std::static_pointer_cast<BlockBasedTableFactory>(
+            ioptions_->table_factory)
+            ->GetBlockBasedTableOptions();
+    if (tbo.modular_filters) {
+      max_bits_per_key_ =
+          tbo.max_modulars * tbo.max_bits_per_key_granularity + 1.0;
+    }
+    if (tbo.filter_policy == nullptr) return;
+    overall_bits_per_key_ =
+        std::static_pointer_cast<const BloomLikeFilterPolicy>(tbo.filter_policy)
+            ->GetBitsPerKey();
+    if (overall_bits_per_key_ == 0.0) return;
+    naive_monkey_bpk = overall_bits_per_key_;
+    naive_monkey_bpk_list = &tbo.naive_monkey_bpk_list;
+    bpk_alloc_type_ = tbo.bpk_alloc_type;
+    no_filter_optimize_for_level0_ = tbo.no_filter_optimize_for_level0;
   }
 
   // Prepare bpk optimizations (calculate the temporary sum and the common
@@ -39,15 +69,18 @@ class BitsPerKeyAllocHelper {
   // allocation
   void PrepareForMnemosynePlus(const Compaction* compaction);
 
+  void UpdateAggStatistics(FileMetaData* file_meta);
+
   double avg_curr_bits_per_key = 0.0;
   uint64_t agg_filter_size_ = 0;
+  const std::vector<double>* naive_monkey_bpk_list = NULL;
+  double naive_monkey_bpk = 0.0;
 
   const ImmutableOptions* ioptions_;
   const VersionStorageInfo* vstorage_;
   BitsPerKeyAllocationType bpk_alloc_type_ =
       BitsPerKeyAllocationType::kDefaultBpkAlloc;
   bool flush_flag_ = false;
-  double naive_monkey_bpk = 0.0;
   bool mnemosyne_bpk_optimization_prepared_flag_ = false;
   bool mnemosyne_plus_bpk_optimization_prepared_flag_ = false;
   bool no_filter_optimize_for_level0_ = false;
@@ -61,9 +94,10 @@ class BitsPerKeyAllocHelper {
   double mnemosyne_plus_temp_sum_in_bpk_optimization_ = 0;
   double mnemosyne_plus_common_constant_in_bpk_optimization_ = 0;
   uint64_t mnemosyne_plus_total_empty_queries_ = 0;
-  double total_bits_for_filter_ = 0.0;
 
+  double total_bits_for_filter_ = 0.0;  // bits only in bpk optimization
   double overall_bits_per_key_ = 0.0;
+  uint64_t total_num_entries_ = 0;  // num of entries in the whole LSM-tree
   uint64_t num_entries_in_compaction_ = 0;
   uint64_t num_bits_for_filter_to_be_removed_ = 0;
 
