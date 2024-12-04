@@ -699,6 +699,10 @@ class VersionStorageInfo {
     return common_constant_in_bpk_optimization_;
   }
 
+  size_t GetBitsPerKeyCommonConstantScaledDown() const {
+    return common_constant_in_bpk_optimization_scaled_down_;
+  }
+
   void SetLevelIDsWithEmptyBpkInMnemosyne(
       const std::unordered_set<size_t>& _levelIDs_with_bpk0_in_monkey) const {
     levelIDs_with_bpk0_in_monkey_ = _levelIDs_with_bpk0_in_monkey;
@@ -710,9 +714,12 @@ class VersionStorageInfo {
   }
 
   void SetBpkCommonConstant(BitsPerKeyAllocationType bits_per_key_alloc_type,
-                            double common_constant) const {
+                            double common_constant,
+                            size_t common_constant_scale_down) const {
     bits_per_key_alloc_type_ = bits_per_key_alloc_type;
     common_constant_in_bpk_optimization_ = common_constant;
+    common_constant_in_bpk_optimization_scaled_down_ =
+        common_constant_scale_down;
   }
 
   uint64_t GetNumPointReadWhenLastFlush() const {
@@ -870,6 +877,7 @@ class VersionStorageInfo {
   mutable BitsPerKeyAllocationType bits_per_key_alloc_type_ =
       BitsPerKeyAllocationType::kDefaultBpkAlloc;
   mutable double common_constant_in_bpk_optimization_ = 0;
+  mutable size_t common_constant_in_bpk_optimization_scaled_down_ = false;
   mutable std::unordered_set<size_t> levelIDs_with_bpk0_in_monkey_;
   mutable std::unordered_set<std::thread::id> thread_ids_;
 

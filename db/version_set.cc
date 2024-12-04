@@ -2254,6 +2254,7 @@ VersionStorageInfo::VersionStorageInfo(
       current_total_filter_size_(0),
       bits_per_key_alloc_type_(BitsPerKeyAllocationType::kDefaultBpkAlloc),
       common_constant_in_bpk_optimization_(0),
+      common_constant_in_bpk_optimization_scaled_down_(0),
       accumulated_file_size_(0),
       accumulated_raw_key_size_(0),
       accumulated_raw_value_size_(0),
@@ -2288,6 +2289,8 @@ VersionStorageInfo::VersionStorageInfo(
     bits_per_key_alloc_type_ = ref_vstorage->bits_per_key_alloc_type_;
     common_constant_in_bpk_optimization_ =
         ref_vstorage->common_constant_in_bpk_optimization_;
+    common_constant_in_bpk_optimization_scaled_down_ =
+        ref_vstorage->common_constant_in_bpk_optimization_scaled_down_;
     levelIDs_with_bpk0_in_monkey_ = ref_vstorage->levelIDs_with_bpk0_in_monkey_;
     leader_thread_id_ = ref_vstorage->leader_thread_id_;
     thread_ids_ = ref_vstorage->thread_ids_;

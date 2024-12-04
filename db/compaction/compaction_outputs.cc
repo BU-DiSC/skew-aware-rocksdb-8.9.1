@@ -129,6 +129,11 @@ Status CompactionOutputs::Finish(
         new_bits_per_key, bpk_alloc_helper_->avg_curr_bits_per_key,
         bpk_alloc_helper_->agg_filter_size_,
         bpk_alloc_helper_->mnemosyne_plus_common_constant_in_bpk_optimization_);
+    bpk_alloc_helper_->vstorage_->SetBpkCommonConstant(
+        bpk_alloc_helper_->bpk_alloc_type_,
+        bpk_alloc_helper_->mnemosyne_plus_common_constant_in_bpk_optimization_,
+        bpk_alloc_helper_
+            ->mnemosyne_plus_common_constant_in_bpk_optimization_scaled_down_);
   }
   current_output().finished = true;
   stats_.bytes_written += current_bytes;

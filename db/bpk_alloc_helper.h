@@ -33,6 +33,8 @@ class BitsPerKeyAllocHelper {
         strcmp(ioptions_->table_factory->Name(),
                TableFactory::kBlockBasedTableName()) != 0)
       return;
+    mnemosyne_plus_common_constant_in_bpk_optimization_scaled_down_ =
+        vstorage_->GetBitsPerKeyCommonConstantScaledDown();
     const BlockBasedTableOptions tbo =
         std::static_pointer_cast<BlockBasedTableFactory>(
             ioptions_->table_factory)
@@ -93,6 +95,7 @@ class BitsPerKeyAllocHelper {
   uint64_t mnemosyne_plus_num_entries_with_empty_queries_ = 0;
   double mnemosyne_plus_temp_sum_in_bpk_optimization_ = 0;
   double mnemosyne_plus_common_constant_in_bpk_optimization_ = 0;
+  size_t mnemosyne_plus_common_constant_in_bpk_optimization_scaled_down_ = 0;
   uint64_t mnemosyne_plus_total_empty_queries_ = 0;
 
   double total_bits_for_filter_ = 0.0;  // bits only in bpk optimization
