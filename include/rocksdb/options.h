@@ -1461,7 +1461,7 @@ struct DBOptions {
   PointReadsTrackMethod point_reads_track_method =
       PointReadsTrackMethod::kNoTrack;
   uint8_t track_point_read_number_window_size = 64;
-  double point_read_learning_rate = 0.2;
+  double point_read_learning_rate = 0.5;
 };
 
 // Options to control the behavior of a database (passed to DB::Open)

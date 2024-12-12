@@ -1057,9 +1057,9 @@ Status FlushJob::WriteLevel0Table() {
     edit_->AddNumExistingPointReads(
         meta_.stats.num_existing_point_reads.load(std::memory_order_relaxed));
     edit_->SetBlobFileAdditions(std::move(blob_file_additions));
-    cfd_->current()->storage_info()->UpdateNumPointReadsStats(
-        meta_.stats.num_point_reads.load(std::memory_order_relaxed),
-        meta_.stats.num_existing_point_reads.load(std::memory_order_relaxed));
+    // cfd_->current()->storage_info()->UpdateNumPointReadsStats(
+    //     meta_.stats.num_point_reads.load(std::memory_order_relaxed),
+    //     meta_.stats.num_existing_point_reads.load(std::memory_order_relaxed));
   }
   // Piggyback FlushJobInfo on the first first flushed memtable.
   mems_[0]->SetFlushJobInfo(GetFlushJobInfo());

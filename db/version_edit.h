@@ -259,9 +259,12 @@ struct FileSampledStats {
       return round(
           (current_global_point_read_number - start_global_point_read_number) *
           1.0 / origin_num_point_reads);
+    } else if (current_global_point_read_number > origin_num_point_reads) {
+      return round(current_global_point_read_number * 1.0 /
+                   origin_num_point_reads);
     }
 
-    return 0;
+    return 1;
   }
 
   // return <the estimated number of point queries, the estimated number of
@@ -322,6 +325,8 @@ struct FileSampledStats {
     if (est_interval != 0) {
       est_num_point_reads =
           (round)(current_global_point_read_number * 1.0 / est_interval);
+    } else {
+      est_num_point_reads = origin_num_point_reads;
     }
     est_num_point_reads = std::max(
         est_num_point_reads, min_num_point_reads + min_est_num_point_reads);
@@ -340,6 +345,9 @@ struct FileSampledStats {
     if (!global_point_read_number_window.empty()) {
       est_existing_ratio = num_existing_point_reads_in_window * 1.0 /
                            global_point_read_number_window.size();
+    } else {
+      est_existing_ratio =
+          min_est_num_point_existing_reads * 1.0 / origin_num_point_reads;
     }
     uint64_t est_num_existing_point_reads =
         (uint64_t)round(

@@ -320,12 +320,23 @@ Status BuildTable(
       // bpk_alloc_helper.PrepareBpkAllocation();
       if (version) {
         uint64_t temp_num_point_reads = round(agg_num_point_reads);
+        /* An illustration to the tracked point reads (agg_num_point_reads noted
+         * as AggQ, agg_num_existing_point_reads noted as AggEQ). Assuming that
+         * AggQ starts to track at Qi:
+         * Q_1 Q_2 Q_3 ... ... Q_i | ... ... Q_{i + AggQ}
+         * Till Q_{i+AggQ}, the accumulated_num_point_reads tracked {Q_1, ...,
+         * Q_i} and empty point queries in AggQ. So accumulated_num_point_reads
+         * = Q_i + (AggQ - AggEQ) Q_i should be the start global point read
+         * number by definition
+         */
+        version->storage_info()->UpdateNumPointReadsStats(
+            round(agg_num_point_reads), round(agg_num_existing_point_reads));
         if (ioptions.point_reads_track_method == kDynamicCompactionAwareTrack) {
           if (version->storage_info()->GetAccumulatedNumPointReads() >
-              floor(agg_num_point_reads)) {
+              floor(agg_num_point_reads - agg_num_existing_point_reads)) {
             meta->stats.start_global_point_read_number =
                 version->storage_info()->GetAccumulatedNumPointReads() -
-                floor(agg_num_point_reads);
+                floor(agg_num_point_reads - agg_num_existing_point_reads);
           }
           // updating the average number of point reads for each level0 file
           // with corresponding number of tracked point reads in memtable (the
@@ -352,6 +363,8 @@ Status BuildTable(
               round(temp_num_point_reads * agg_num_existing_point_reads /
                     agg_num_point_reads),
               agg_num_existing_point_reads));
+          // the number of existing point queries will be slighly overestimated
+          // here
         }
         meta->bpk = bpk_alloc_helper.overall_bits_per_key_;
         if (!bpk_alloc_helper.no_filter_optimize_for_level0_ &&
@@ -405,14 +418,18 @@ Status BuildTable(
 
       bpk_alloc_helper.UpdateAggStatistics(meta);
 
-      ROCKS_LOG_INFO(ioptions.info_log,
-                     "[%s] Flushes generates new file %" PRIu64
-                     " with reset bits-per-key %.4f / %.4f / %" PRIu64
-                     " / %.4f",
-                     tboptions.column_family_name.c_str(), meta->fd.GetNumber(),
-                     new_bits_per_key, bpk_alloc_helper.avg_curr_bits_per_key,
-                     bpk_alloc_helper.agg_filter_size_,
-                     version->storage_info()->GetBitsPerKeyCommonConstant());
+      ROCKS_LOG_INFO(
+          ioptions.info_log,
+          "[%s] Flushes generates new file %" PRIu64
+          " with reset bits-per-key %.4f / %.4f / %" PRIu64 " / %.4f / %" PRIu64
+          " / %" PRIu64 " / %" PRIu64,
+          tboptions.column_family_name.c_str(), meta->fd.GetNumber(),
+          new_bits_per_key, bpk_alloc_helper.avg_curr_bits_per_key,
+          bpk_alloc_helper.agg_filter_size_,
+          version->storage_info()->GetBitsPerKeyCommonConstant(),
+          meta->stats.num_point_reads.load(),
+          meta->stats.num_existing_point_reads.load(),
+          version->storage_info()->GetAccumulatedNumEmptyPointReadsByFile());
 
       if (memtable_payload_bytes != nullptr &&
           memtable_garbage_bytes != nullptr) {
