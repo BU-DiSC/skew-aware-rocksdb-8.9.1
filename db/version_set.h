@@ -682,6 +682,11 @@ class VersionStorageInfo {
     return accumulated_num_point_reads_.load(std::memory_order_relaxed);
   }
 
+  uint64_t GetAccumulatedNumExistingPointReads() const {
+    return accumulated_num_existing_point_reads_.load(
+        std::memory_order_relaxed);
+  }
+
   double GetAvgNumPointReadsPerLvl0File() const {
     return avg_num_point_reads_per_lvl0_file_;
   }

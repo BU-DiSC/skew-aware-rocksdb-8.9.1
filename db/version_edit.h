@@ -343,17 +343,28 @@ struct FileSampledStats {
           ((0x1 << global_point_read_number_window.size()) - 1));
     }
     if (!global_point_read_number_window.empty()) {
-      est_existing_ratio = num_existing_point_reads_in_window * 1.0 /
-                           global_point_read_number_window.size();
+      est_existing_ratio = learning_rate * num_existing_point_reads_in_window *
+                               1.0 / global_point_read_number_window.size() +
+                           (1.0 - learning_rate) *
+                               min_est_num_point_existing_reads * 1.0 /
+                               origin_num_point_reads;
     } else {
       est_existing_ratio =
           min_est_num_point_existing_reads * 1.0 / origin_num_point_reads;
     }
     uint64_t est_num_existing_point_reads =
-        (uint64_t)round(
+        std::max((uint64_t)round(est_existing_ratio * est_num_point_reads),
+                 min_est_num_point_existing_reads);
+    /*
+    uint64_t est_num_existing_point_reads = min_est_num_point_existing_reads;
+    if (est_num_point_reads > min_est_num_point_existing_reads) {
+      est_num_existing_point_reads += round(
             est_existing_ratio *
-            (est_num_point_reads - min_est_num_point_existing_reads)) +
-        min_est_num_point_existing_reads;
+            (est_num_point_reads - min_est_num_point_existing_reads));
+      if (est_num_existing_point_reads > est_num_point_reads) {
+        est_num_point_reads = est_num_existing_point_reads;
+      }
+    }*/
     return std::make_pair(est_num_point_reads, est_num_existing_point_reads);
   }
 };

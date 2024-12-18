@@ -976,6 +976,7 @@ class LevelIterator final : public InternalIterator {
         adjusted_avg_num_point_reads_for_leftmost_file_(0.0),
         adjusted_avg_num_point_reads_for_rightmost_file_(0.0),
         num_point_reads_factor_(1.0),
+        num_existing_point_reads_factor_(1.0),
         current_global_point_reads_counter_(current_global_point_reads_counter),
         table_cache_(table_cache),
         read_options_(read_options),
@@ -1097,9 +1098,12 @@ class LevelIterator final : public InternalIterator {
     adjusted_avg_num_point_reads_ = adjusted_avg_num_point_reads;
   }
 
-  // set the factor as the number of sorted runs
   void SetNumPointReadsFactor(double factor) {
     num_point_reads_factor_ = factor;
+  }
+
+  void SetNumExistingPointReadsFactor(double factor) {
+    num_existing_point_reads_factor_ = factor;
   }
 
   void SetIsDeepestLevelInCompaction(bool is_deepest_level_in_compaction) {
@@ -1201,6 +1205,7 @@ class LevelIterator final : public InternalIterator {
   double adjusted_avg_num_point_reads_for_leftmost_file_;
   double adjusted_avg_num_point_reads_for_rightmost_file_;
   double num_point_reads_factor_;
+  double num_existing_point_reads_factor_;
   uint64_t current_global_point_reads_counter_;
   TableCache* table_cache_;
   const ReadOptions& read_options_;
@@ -1574,17 +1579,24 @@ void LevelIterator::SetFileIterator(InternalIterator* iter,
   InternalIterator* old_iter = file_iter_.Set(iter);
   if (iter != nullptr) {
     if (should_inherit_num_point_reads) {
-      this->SetAvgNumPointReads(iter->GetAvgNumPointReads() /
-                                num_point_reads_factor_);
-      iter->SetAvgNumPointReads(iter->GetAvgNumPointReads() /
-                                num_point_reads_factor_);
+      this->SetAvgNumExistingPointReads(iter->GetAvgNumExistingPointReads() *
+                                        num_existing_point_reads_factor_);
+      iter->SetAvgNumExistingPointReads(this->GetAvgNumExistingPointReads());
+      this->SetAvgNumPointReads(
+          std::max(iter->GetAvgNumPointReads() * num_point_reads_factor_,
+                   this->GetAvgNumExistingPointReads()));
+      iter->SetAvgNumPointReads(this->GetAvgNumPointReads());
       this->SetIsDeepestLevel(true);
       iter->SetIsDeepestLevel(true);
     } else {
-      this->SetAvgNumPointReads(iter->GetAvgNumExistingPointReads() +
-                                adjusted_avg_num_point_reads);
-      iter->SetAvgNumPointReads(iter->GetAvgNumExistingPointReads() +
-                                adjusted_avg_num_point_reads);
+      this->SetAvgNumPointReads(iter->GetAvgNumExistingPointReads() *
+                                    num_existing_point_reads_factor_ +
+                                adjusted_avg_num_point_reads *
+                                    num_point_reads_factor_);
+      iter->SetAvgNumPointReads(this->GetAvgNumPointReads());
+      this->SetAvgNumExistingPointReads(iter->GetAvgNumExistingPointReads() *
+                                        num_existing_point_reads_factor_);
+      iter->SetAvgNumExistingPointReads(this->GetAvgNumExistingPointReads());
       this->SetIsDeepestLevel(false);
       iter->SetIsDeepestLevel(false);
     }
@@ -7441,7 +7453,6 @@ InternalIterator* VersionSet::MakeInputIterator(
       std::pair<TruncatedRangeDelIterator*, TruncatedRangeDelIterator***>>
       range_tombstones;
   size_t num = 0;
-  double factor = 0.0;
   size_t input_sorted_runs = c->num_input_levels();
   for (size_t which = 0; which < c->num_input_levels(); which++) {
     if (c->input_levels(which)->num_files != 0) {
@@ -7536,8 +7547,18 @@ InternalIterator* VersionSet::MakeInputIterator(
                              (fmd.num_entries - fmd.num_range_deletions)) +
               "], ";
 
-          list[num]->SetAvgNumPointReads(list[num]->GetAvgNumPointReads() *
-                                         1.0 / input_sorted_runs);
+          double temp_avg_num_point_reads = list[num]->GetAvgNumPointReads() *
+                                            c->num_point_reads_factor() /
+                                            input_sorted_runs;
+          double temp_avg_num_existing_point_reads =
+              list[num]->GetAvgNumExistingPointReads() *
+              c->num_existing_point_reads_factor();
+          if (temp_avg_num_existing_point_reads > temp_avg_num_point_reads) {
+            temp_avg_num_point_reads = temp_avg_num_existing_point_reads;
+          }
+          list[num]->SetAvgNumPointReads(temp_avg_num_point_reads);
+          list[num]->SetAvgNumExistingPointReads(
+              temp_avg_num_existing_point_reads);
           num++;
           range_tombstones.emplace_back(range_tombstone_iter, nullptr);
         }
@@ -7693,12 +7714,14 @@ InternalIterator* VersionSet::MakeInputIterator(
           tmp_level_iterator->SetIsDeepestLevelInCompaction(true);
           num_non_existing_point_reads_in_last_level =
               temp_agg_num_non_existing_point_reads;
-          // factor = c->max_num_entries_in_compaction() * 1.0 *
-          //         flevel->num_files / c->existing_entries_in_output_level();
-          factor = 1.0;
-          tmp_level_iterator->SetNumPointReadsFactor(factor);
-          stats_log += " factor : " + std::to_string(factor);
+          stats_log += " num_point_reads factor : " +
+                       std::to_string(c->num_point_reads_factor());
+          stats_log += " num_existing_point_reads factor : " +
+                       std::to_string(c->num_existing_point_reads_factor());
         }
+        tmp_level_iterator->SetNumPointReadsFactor(c->num_point_reads_factor());
+        tmp_level_iterator->SetNumExistingPointReadsFactor(
+            c->num_existing_point_reads_factor());
 
         list[num] = tmp_level_iterator;
 
@@ -7818,6 +7841,21 @@ InternalIterator* VersionSet::MakeInputIterator(
                        1.0 / input_sorted_runs /
                        (meta_for_file_with_smallest_key->num_entries -
                         meta_for_file_with_smallest_key->num_range_deletions));
+  } else {
+    level_iter_with_smallest_key->SetAdjustedAvgNumPointQueriesForLeftmostFile(
+        num_non_existing_point_reads_for_file_with_smallest_key * 1.0 /
+        (meta_for_file_with_smallest_key->num_entries -
+         meta_for_file_with_smallest_key->num_range_deletions) /
+        input_sorted_runs);
+    stats_log +=
+        " adjusting file (level iter) with smallest key: " +
+        std::to_string(meta_for_file_with_smallest_key->fd.GetNumber()) +
+        " by " +
+        std::to_string(num_non_existing_point_reads_for_file_with_smallest_key *
+                       1.0 /
+                       (meta_for_file_with_smallest_key->num_entries -
+                        meta_for_file_with_smallest_key->num_range_deletions) /
+                       input_sorted_runs);
   }
 
   if (level_iter_with_largest_key == nullptr) {
@@ -7836,6 +7874,21 @@ InternalIterator* VersionSet::MakeInputIterator(
                        1.0 / input_sorted_runs /
                        (meta_for_file_with_largest_key->num_entries -
                         meta_for_file_with_largest_key->num_range_deletions));
+  } else {
+    level_iter_with_largest_key->SetAdjustedAvgNumPointQueriesForRightmostFile(
+        num_non_existing_point_reads_for_file_with_largest_key * 1.0 /
+        (meta_for_file_with_largest_key->num_entries -
+         meta_for_file_with_largest_key->num_range_deletions) /
+        input_sorted_runs);
+    stats_log +=
+        " adjusting file (level iter) with largest key: " +
+        std::to_string(meta_for_file_with_largest_key->fd.GetNumber()) +
+        " by " +
+        std::to_string(num_non_existing_point_reads_for_file_with_largest_key *
+                       1.0 /
+                       (meta_for_file_with_largest_key->num_entries -
+                        meta_for_file_with_largest_key->num_range_deletions) /
+                       input_sorted_runs);
   }
 
   ROCKS_LOG_INFO(c->immutable_options()->info_log,

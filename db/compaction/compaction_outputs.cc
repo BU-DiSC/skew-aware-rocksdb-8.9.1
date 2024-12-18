@@ -32,6 +32,7 @@ Status CompactionOutputs::Finish(
   Status s = intput_status;
   uint64_t min_num_point_reads = 0;
   uint64_t num_point_reads = 0;
+  uint64_t num_existing_point_reads = 0;
   double new_bits_per_key = 0.0;
   if (s.ok()) {
     std::string seqno_to_time_mapping_str;
@@ -65,10 +66,23 @@ Status CompactionOutputs::Finish(
       num_point_reads = round(avg_num_point_reads * meta->num_entries);
 
       file_point_read_inc(meta, num_point_reads);
-      file_existing_point_read_inc(
-          meta, std::min(num_point_reads,
-                         (uint64_t)round(
-                             current_output().agg_num_existing_point_reads)));
+      num_existing_point_reads =
+          (uint64_t)round(current_output().agg_num_existing_point_reads);
+      if (compaction_->bottommost_level()) {
+        double learning_rate =
+            compaction_->immutable_options()->point_read_learning_rate;
+        num_existing_point_reads = (uint64_t)round(
+            (num_existing_point_reads * learning_rate / num_point_reads +
+             compaction_->input_vstorage()
+                     ->GetAccumulatedNumExistingPointReads() *
+                 (1.0 - learning_rate) /
+                 compaction_->input_vstorage()->GetAccumulatedNumPointReads()) *
+            num_point_reads);
+      }
+      if (num_existing_point_reads > num_point_reads) {
+        num_existing_point_reads = num_point_reads;
+      }
+      file_existing_point_read_inc(meta, num_existing_point_reads);
     } else if (compaction_->immutable_options()->point_reads_track_method ==
                kNaiiveTrack) {
       file_point_read_inc(meta,

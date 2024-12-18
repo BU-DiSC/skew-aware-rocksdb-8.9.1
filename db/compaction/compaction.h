@@ -156,6 +156,11 @@ class Compaction {
 
   size_t num_input_files() const { return num_input_files_; }
 
+  double num_point_reads_factor() const { return num_point_reads_factor_; }
+  double num_existing_point_reads_factor() const {
+    return num_existing_point_reads_factor_;
+  }
+
   // Returns input version of the compaction
   Version* input_version() const { return input_version_; }
 
@@ -465,7 +470,7 @@ class Compaction {
   // min_avg_num_point_reads_from_deepest_level_; }
 
   uint64_t GetSnapshotAggTotalNumPointReads() const {
-    return agg_total_num_point_reads_;
+    return recorded_total_num_point_reads_;
   }
 
  private:
@@ -610,9 +615,11 @@ class Compaction {
       PenultimateOutputRangeType::kNotSupported;
 
   uint64_t num_input_files_;
-  uint64_t agg_total_num_point_reads_;
+  uint64_t recorded_total_num_point_reads_;
   uint64_t avg_num_point_reads_with_naiive_track_;
   uint64_t avg_num_existing_point_reads_with_naiive_track_;
+  double num_point_reads_factor_;
+  double num_existing_point_reads_factor_;
   double
       min_avg_num_point_reads_from_upper_level_;  // the inheritance method may
                                                   // underestimate the real

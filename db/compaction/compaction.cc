@@ -344,7 +344,9 @@ Compaction::Compaction(
                                          start_level_, output_level_)),
       num_input_files_(0),
       avg_num_point_reads_with_naiive_track_(0),
-      avg_num_existing_point_reads_with_naiive_track_(0) {
+      avg_num_existing_point_reads_with_naiive_track_(0),
+      num_point_reads_factor_(1.0),
+      num_existing_point_reads_factor_(1.0) {
   MarkFilesBeingCompacted(true);
   if (is_manual_compaction_) {
     compaction_reason_ = CompactionReason::kManualCompaction;
@@ -379,7 +381,12 @@ Compaction::Compaction(
     existing_entries_in_output_level_ = 0;
     min_avg_num_point_reads_from_upper_level_ = 0;
     max_avg_num_point_reads_ = 0;
-    agg_total_num_point_reads_ = vstorage->GetAccumulatedNumPointReads();
+    recorded_total_num_point_reads_ = vstorage->GetAccumulatedNumPointReads();
+
+    uint64_t agg_total_num_point_reads =
+        0;  // added by num_existing_point_reads
+    uint64_t agg_total_num_existing_point_reads =
+        0;  // added by num_existing_point_reads
 
     std::vector<size_t> num_entries_per_level(num_input_levels(), 0);
     double avg_num_point_reads_per_lvl0_file = 0.0;
@@ -391,16 +398,20 @@ Compaction::Compaction(
         avg_num_point_reads_per_lvl0_file = 0.0;
       }
       DoGenerateLevelFilesBrief(&input_levels_[which], inputs_[which].files,
-                                &arena_, agg_total_num_point_reads_,
+                                &arena_, recorded_total_num_point_reads_,
                                 immutable_options_.point_read_learning_rate, -1,
                                 avg_num_point_reads_per_lvl0_file);
       num_input_files_ += inputs_[which].files.size();
-      for (FileMetaData* meta : inputs_[which].files) {
+      for (size_t i = 0; i < input_levels_[which].num_files; i++) {
         num_entries_per_level[which] +=
-            meta->num_entries - meta->num_range_deletions;
+            inputs_[which].files[i]->num_entries -
+            inputs_[which].files[i]->num_range_deletions;
+        agg_total_num_existing_point_reads +=
+            input_levels_[which].files[i].snapshot_num_existing_point_reads;
       }
       max_num_entries_in_compaction_ += num_entries_per_level[which];
     }
+    agg_total_num_point_reads = agg_total_num_existing_point_reads;
 
     uint64_t tmp_entries = 0;
     // use the minimum avg point reads per file to represent the avg point reads
@@ -416,7 +427,6 @@ Compaction::Compaction(
                 max_avg_num_point_reads_,
                 input_levels_[which].files[i].snapshot_num_point_reads * 1.0 /
                     tmp_entries);
-            ;
             min_avg_num_point_reads_from_upper_level_ = std::max(
                 min_avg_num_point_reads_from_upper_level_,
                 input_levels_[which].files[i].snapshot_num_point_reads * 1.0 /
@@ -434,7 +444,6 @@ Compaction::Compaction(
                 max_avg_num_point_reads_,
                 input_levels_[which].files[i].snapshot_num_point_reads * 1.0 /
                     tmp_entries);
-            ;
             temp_avg_num_point_reads_from_upper_level_ = std::min(
                 temp_avg_num_point_reads_from_upper_level_,
                 input_levels_[which].files[i].snapshot_num_point_reads *
@@ -448,6 +457,11 @@ Compaction::Compaction(
         }
       } else {
         existing_entries_in_output_level_ = num_entries_per_level[which];
+        for (size_t i = 0; i < input_levels_[which].num_files; i++) {
+          agg_total_num_point_reads +=
+              input_levels_[which].files[i].snapshot_num_point_reads -
+              input_levels_[which].files[i].snapshot_num_existing_point_reads;
+        }
       }
     }
 
@@ -455,6 +469,17 @@ Compaction::Compaction(
          input_vstorage_->LevelFiles(output_level_)) {
       max_num_entries_in_output_level_ +=
           meta->num_entries - meta->num_range_deletions;
+    }
+
+    if (recorded_total_num_point_reads_ < agg_total_num_point_reads) {
+      num_point_reads_factor_ =
+          recorded_total_num_point_reads_ * 1.0 / agg_total_num_point_reads;
+    }
+    if (vstorage->GetAccumulatedNumExistingPointReads() <
+        agg_total_num_existing_point_reads) {
+      num_existing_point_reads_factor_ =
+          vstorage->GetAccumulatedNumExistingPointReads() * 1.0 /
+          agg_total_num_existing_point_reads;
     }
 
     if (immutable_options_.point_reads_track_method == kNaiiveTrack) {
