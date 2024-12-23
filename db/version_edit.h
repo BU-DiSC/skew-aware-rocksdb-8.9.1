@@ -228,7 +228,8 @@ struct FileSampledStats {
       if (current_global_point_read_number >
               global_point_read_number_window.front() &&
           global_point_read_number_window.front() >
-              start_global_point_read_number) {
+              start_global_point_read_number &&
+          origin_num_point_reads > 0) {
         return round((current_global_point_read_number -
                       global_point_read_number_window.front()) *
                          learning_rate /
@@ -247,21 +248,26 @@ struct FileSampledStats {
       }
 
       if (global_point_read_number_window.front() >
-          start_global_point_read_number) {
+              start_global_point_read_number &&
+          origin_num_point_reads > 0) {
         return round((global_point_read_number_window.front() -
                       start_global_point_read_number) *
                      1.0 / origin_num_point_reads);
       }
     }
 
-    if (current_global_point_read_number > start_global_point_read_number &&
-        start_global_point_read_number != 0) {
-      return round(
-          (current_global_point_read_number - start_global_point_read_number) *
-          1.0 / origin_num_point_reads);
-    } else if (current_global_point_read_number > origin_num_point_reads) {
-      return round(current_global_point_read_number * 1.0 /
-                   origin_num_point_reads);
+    if (origin_num_point_reads > 0) {
+      if (current_global_point_read_number > start_global_point_read_number &&
+          start_global_point_read_number != 0) {
+        return round((current_global_point_read_number -
+                      start_global_point_read_number) *
+                     1.0 / origin_num_point_reads);
+      } else if (current_global_point_read_number > origin_num_point_reads) {
+        return round(current_global_point_read_number * 1.0 /
+                     origin_num_point_reads);
+      }
+    } else {
+      return 0;
     }
 
     return 1;
@@ -343,18 +349,27 @@ struct FileSampledStats {
           ((0x1 << global_point_read_number_window.size()) - 1));
     }
     if (!global_point_read_number_window.empty()) {
-      est_existing_ratio = learning_rate * num_existing_point_reads_in_window *
-                               1.0 / global_point_read_number_window.size() +
-                           (1.0 - learning_rate) *
-                               min_est_num_point_existing_reads * 1.0 /
-                               origin_num_point_reads;
-    } else {
+      if (origin_num_point_reads != 0) {
+        est_existing_ratio =
+            learning_rate * num_existing_point_reads_in_window * 1.0 /
+                global_point_read_number_window.size() +
+            (1.0 - learning_rate) * min_est_num_point_existing_reads * 1.0 /
+                origin_num_point_reads;
+      } else {
+        est_existing_ratio = num_existing_point_reads_in_window * 1.0 /
+                             global_point_read_number_window.size();
+      }
+
+    } else if (origin_num_point_reads != 0) {
       est_existing_ratio =
           min_est_num_point_existing_reads * 1.0 / origin_num_point_reads;
+    } else {
+      est_existing_ratio = 0.0;
     }
-    uint64_t est_num_existing_point_reads =
+    uint64_t est_num_existing_point_reads = std::min(
         std::max((uint64_t)round(est_existing_ratio * est_num_point_reads),
-                 min_est_num_point_existing_reads);
+                 min_est_num_point_existing_reads),
+        est_num_point_reads);
     /*
     uint64_t est_num_existing_point_reads = min_est_num_point_existing_reads;
     if (est_num_point_reads > min_est_num_point_existing_reads) {
