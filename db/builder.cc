@@ -417,7 +417,7 @@ Status BuildTable(
       meta->filter_size = tp.filter_size;
 
       bpk_alloc_helper.UpdateAggStatistics(meta);
-
+      /*
       ROCKS_LOG_INFO(
           ioptions.info_log,
           "[%s] Flushes generates new file %" PRIu64
@@ -429,7 +429,7 @@ Status BuildTable(
           version->storage_info()->GetBitsPerKeyCommonConstant(),
           meta->stats.num_point_reads.load(),
           meta->stats.num_existing_point_reads.load(),
-          version->storage_info()->GetAccumulatedNumEmptyPointReadsByFile());
+          version->storage_info()->GetAccumulatedNumEmptyPointReadsByFile());*/
 
       if (memtable_payload_bytes != nullptr &&
           memtable_garbage_bytes != nullptr) {

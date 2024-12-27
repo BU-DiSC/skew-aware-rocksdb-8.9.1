@@ -7439,7 +7439,7 @@ InternalIterator* VersionSet::MakeInputIterator(
   uint64_t temp_num_point_reads = 0;
   size_t iterator_index_with_max_num_non_existing_point_reads = 0;
 
-  std::string stats_log = "";
+  // std::string stats_log = "";
 
   std::pair<uint64_t, uint64_t> temp_estimated_num_point_read_stats;
   uint64_t current_global_point_reads_counter =
@@ -7536,7 +7536,7 @@ InternalIterator* VersionSet::MakeInputIterator(
                 temp_num_non_existing_point_reads;
             meta_for_file_with_largest_key = flevel->files[i].file_metadata;
           }
-
+          /*
           stats_log +=
               "[ fileID:" + std::to_string(fmd.fd.GetNumber()) +
               ", num_point_reads:" + std::to_string(temp_num_point_reads) +
@@ -7545,7 +7545,7 @@ InternalIterator* VersionSet::MakeInputIterator(
               ", avg_num_point_reads:" +
               std::to_string(temp_num_point_reads * 1.0 /
                              (fmd.num_entries - fmd.num_range_deletions)) +
-              "], ";
+              "], ";*/
 
           double temp_avg_num_point_reads = list[num]->GetAvgNumPointReads() *
                                             c->num_point_reads_factor() /
@@ -7576,7 +7576,7 @@ InternalIterator* VersionSet::MakeInputIterator(
           temp_num_existing_point_reads =
               flevel->files[i].snapshot_num_existing_point_reads;
 
-          stats_log +=
+          /*stats_log +=
               "[ fileID:" + std::to_string(fmd.fd.GetNumber()) +
               ", num_point_reads:" + std::to_string(temp_num_point_reads) +
               ", num_existing_point_reads:" +
@@ -7584,7 +7584,7 @@ InternalIterator* VersionSet::MakeInputIterator(
               ", avg_num_point_reads:" +
               std::to_string(temp_num_point_reads * 1.0 /
                              (fmd.num_entries - fmd.num_range_deletions)) +
-              "], ";
+              "], ";*/
 
           temp_num_non_existing_point_reads =
               temp_num_point_reads - temp_num_existing_point_reads;
@@ -7714,10 +7714,11 @@ InternalIterator* VersionSet::MakeInputIterator(
           tmp_level_iterator->SetIsDeepestLevelInCompaction(true);
           num_non_existing_point_reads_in_last_level =
               temp_agg_num_non_existing_point_reads;
+          /*
           stats_log += " num_point_reads factor : " +
                        std::to_string(c->num_point_reads_factor());
           stats_log += " num_existing_point_reads factor : " +
-                       std::to_string(c->num_existing_point_reads_factor());
+                       std::to_string(c->num_existing_point_reads_factor());*/
         }
         tmp_level_iterator->SetNumPointReadsFactor(c->num_point_reads_factor());
         tmp_level_iterator->SetNumExistingPointReadsFactor(
@@ -7796,8 +7797,8 @@ InternalIterator* VersionSet::MakeInputIterator(
             c->max_num_entries_in_compaction();
         level_iter_with_max_non_existing_point_reads
             ->SetAdjustedAvgNumPointQueries(adjusted_avg_num_point_queries);
-        stats_log += " adjusting level_iter with " +
-                     std::to_string(adjusted_avg_num_point_queries) + ". ";
+        // stats_log += " adjusting level_iter with " +
+        //              std::to_string(adjusted_avg_num_point_queries) + ". ";
       }
     } else {
       list[iterator_index_with_max_num_non_existing_point_reads]
@@ -7808,13 +7809,13 @@ InternalIterator* VersionSet::MakeInputIterator(
                 num_non_existing_point_reads_in_last_level) *
                1.0) /
                   c->max_num_entries_in_compaction());
-      stats_log +=
+      /*stats_log +=
           " adjusting pure iter with " +
           std::to_string(((max_num_non_existing_point_reads -
                            num_non_existing_point_reads_in_last_level) *
                           1.0) /
                          c->max_num_entries_in_compaction()) +
-          ". ";
+          ". ";*/
     }
   }
 
@@ -7833,21 +7834,21 @@ InternalIterator* VersionSet::MakeInputIterator(
             (meta_for_file_with_smallest_key->num_entries -
              meta_for_file_with_smallest_key->num_range_deletions) /
             input_sorted_runs);
-    stats_log +=
+    /*stats_log +=
         " adjusting file (pure iter) with smallest key: " +
         std::to_string(meta_for_file_with_smallest_key->fd.GetNumber()) +
         " by " +
         std::to_string(num_non_existing_point_reads_for_file_with_smallest_key *
                        1.0 / input_sorted_runs /
                        (meta_for_file_with_smallest_key->num_entries -
-                        meta_for_file_with_smallest_key->num_range_deletions));
+                        meta_for_file_with_smallest_key->num_range_deletions));*/
   } else {
     level_iter_with_smallest_key->SetAdjustedAvgNumPointQueriesForLeftmostFile(
         num_non_existing_point_reads_for_file_with_smallest_key * 1.0 /
         (meta_for_file_with_smallest_key->num_entries -
          meta_for_file_with_smallest_key->num_range_deletions) /
         input_sorted_runs);
-    stats_log +=
+    /*stats_log +=
         " adjusting file (level iter) with smallest key: " +
         std::to_string(meta_for_file_with_smallest_key->fd.GetNumber()) +
         " by " +
@@ -7855,7 +7856,7 @@ InternalIterator* VersionSet::MakeInputIterator(
                        1.0 /
                        (meta_for_file_with_smallest_key->num_entries -
                         meta_for_file_with_smallest_key->num_range_deletions) /
-                       input_sorted_runs);
+                       input_sorted_runs);*/
   }
 
   if (level_iter_with_largest_key == nullptr) {
@@ -7866,21 +7867,21 @@ InternalIterator* VersionSet::MakeInputIterator(
             (meta_for_file_with_largest_key->num_entries -
              meta_for_file_with_largest_key->num_range_deletions));
 
-    stats_log +=
+    /*stats_log +=
         " adjusting file (pure iter) with largest key: " +
         std::to_string(meta_for_file_with_largest_key->fd.GetNumber()) +
         " by " +
         std::to_string(num_non_existing_point_reads_for_file_with_largest_key *
                        1.0 / input_sorted_runs /
                        (meta_for_file_with_largest_key->num_entries -
-                        meta_for_file_with_largest_key->num_range_deletions));
+                        meta_for_file_with_largest_key->num_range_deletions));*/
   } else {
     level_iter_with_largest_key->SetAdjustedAvgNumPointQueriesForRightmostFile(
         num_non_existing_point_reads_for_file_with_largest_key * 1.0 /
         (meta_for_file_with_largest_key->num_entries -
          meta_for_file_with_largest_key->num_range_deletions) /
         input_sorted_runs);
-    stats_log +=
+    /*stats_log +=
         " adjusting file (level iter) with largest key: " +
         std::to_string(meta_for_file_with_largest_key->fd.GetNumber()) +
         " by " +
@@ -7888,12 +7889,13 @@ InternalIterator* VersionSet::MakeInputIterator(
                        1.0 /
                        (meta_for_file_with_largest_key->num_entries -
                         meta_for_file_with_largest_key->num_range_deletions) /
-                       input_sorted_runs);
+                       input_sorted_runs);*/
   }
 
-  ROCKS_LOG_INFO(c->immutable_options()->info_log,
-                 "[%s] Generating compaction iterator with stats [%s]",
-                 c->column_family_data()->GetName().c_str(), stats_log.c_str());
+  // ROCKS_LOG_INFO(c->immutable_options()->info_log,
+  //                "[%s] Generating compaction iterator with stats [%s]",
+  //                c->column_family_data()->GetName().c_str(),
+  //                stats_log.c_str());
 
   assert(num <= space);
   InternalIterator* result = NewCompactionMergingIterator(
