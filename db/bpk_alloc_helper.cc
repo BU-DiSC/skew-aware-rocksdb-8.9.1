@@ -12,13 +12,13 @@ const double log_2_squared = std::pow(std::log(2), 2);
 void BitsPerKeyAllocHelper::PrepareBpkAllocation(const Compaction* compaction) {
   if (bpk_alloc_type_ == BitsPerKeyAllocationType::kDefaultBpkAlloc) return;
   if (bpk_alloc_type_ == BitsPerKeyAllocationType::kNaiveMonkeyBpkAlloc) {
-    if (naive_monkey_bpk_list == NULL) return;
+    if (naive_monkey_bpk_list.size() == 0) return;
     int output_level = 0;
     if (compaction != NULL) {
       output_level = compaction->output_level();
     }
-    if (output_level < (int)naive_monkey_bpk_list->size()) {
-      naive_monkey_bpk = naive_monkey_bpk_list->at(output_level);
+    if (output_level < (int)naive_monkey_bpk_list.size()) {
+      naive_monkey_bpk = naive_monkey_bpk_list[output_level];
     } else {
       naive_monkey_bpk = overall_bits_per_key_;
     }
@@ -603,6 +603,18 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
 }
 
 void BitsPerKeyAllocHelper::UpdateAggStatistics(FileMetaData* file_meta) {
+  if (bpk_alloc_type_ == BitsPerKeyAllocationType::kDefaultBpkAlloc ||
+      bpk_alloc_type_ == BitsPerKeyAllocationType::kNaiveMonkeyBpkAlloc) {
+    agg_filter_size_ = 0;
+    total_num_entries_ = 0;
+    for (int level = 0; level < vstorage_->num_levels(); ++level) {
+      for (auto* meta : vstorage_->LevelFiles(level)) {
+        agg_filter_size_ += meta->filter_size;
+        total_num_entries_ += meta->num_entries - meta->num_range_deletions;
+      }
+    }
+  }
+
   if (file_meta != NULL) {
     agg_filter_size_ += file_meta->filter_size;
     total_num_entries_ +=
@@ -617,6 +629,8 @@ void BitsPerKeyAllocHelper::UpdateAggStatistics(FileMetaData* file_meta) {
           (file_meta->num_entries - file_meta->num_range_deletions);
     }
   }
+
+  vstorage_->UpdateCurrentTotalFilterSize(agg_filter_size_);
 }
 
 };  // namespace ROCKSDB_NAMESPACE

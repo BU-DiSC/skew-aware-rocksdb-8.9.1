@@ -126,7 +126,7 @@ Status CompactionOutputs::Finish(
     meta->filter_size = builder_->GetTableProperties().filter_size;
 
     bpk_alloc_helper_->UpdateAggStatistics(meta);
-    /*
+
     ROCKS_LOG_INFO(
         compaction_->immutable_options()->info_log,
         "[%s] Compaction generates new file %" PRIu64
@@ -142,7 +142,7 @@ Status CompactionOutputs::Finish(
         min_num_point_reads, current_output().agg_num_entries_from_upper_level,
         new_bits_per_key, bpk_alloc_helper_->avg_curr_bits_per_key,
         bpk_alloc_helper_->agg_filter_size_,
-        bpk_alloc_helper_->mnemosyne_plus_common_constant_in_bpk_optimization_);*/
+        bpk_alloc_helper_->mnemosyne_plus_common_constant_in_bpk_optimization_);
     bpk_alloc_helper_->vstorage_->SetBpkCommonConstant(
         bpk_alloc_helper_->bpk_alloc_type_,
         bpk_alloc_helper_->mnemosyne_plus_common_constant_in_bpk_optimization_,

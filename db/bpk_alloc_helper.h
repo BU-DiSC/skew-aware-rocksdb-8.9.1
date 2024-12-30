@@ -49,7 +49,7 @@ class BitsPerKeyAllocHelper {
             ->GetBitsPerKey();
     if (overall_bits_per_key_ == 0.0) return;
     naive_monkey_bpk = overall_bits_per_key_;
-    naive_monkey_bpk_list = &tbo.naive_monkey_bpk_list;
+    naive_monkey_bpk_list = tbo.naive_monkey_bpk_list;
     bpk_alloc_type_ = tbo.bpk_alloc_type;
     no_filter_optimize_for_level0_ = tbo.no_filter_optimize_for_level0;
   }
@@ -75,7 +75,7 @@ class BitsPerKeyAllocHelper {
 
   double avg_curr_bits_per_key = 0.0;
   uint64_t agg_filter_size_ = 0;
-  const std::vector<double>* naive_monkey_bpk_list = NULL;
+  std::vector<double> naive_monkey_bpk_list;
   double naive_monkey_bpk = 0.0;
 
   const ImmutableOptions* ioptions_;

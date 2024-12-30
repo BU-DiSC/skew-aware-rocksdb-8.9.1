@@ -2196,6 +2196,7 @@ void BlockBasedTableBuilder::ResetFilterBitsPerKey(double* bits_per_key) {
   }
   if (*bits_per_key < 1.0 && rep_->filter_builder) {
     *bits_per_key = 0;
+    rep_->filter_builder.reset();
     return;
   }
   if (rep_->table_options.modular_filters) {
