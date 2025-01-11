@@ -429,14 +429,14 @@ void BitsPerKeyAllocHelper::PrepareForMnemosynePlus(
 
   if (mnemosyne_plus_common_constant_in_bpk_optimization_scaled_down_ > 0) {
     // if (vstorage_->GetBitsPerKeyCommonConstant() < 0 &&
-    //		  mnemosyne_plus_common_constant_in_bpk_optimization_ <
-    //vstorage_->GetBitsPerKeyCommonConstant()) {
-    /*
-     mnemosyne_plus_common_constant_in_bpk_optimization_ =
-         ioptions_->point_read_learning_rate *
-             vstorage_->GetBitsPerKeyCommonConstant() +
-         (1.0 - ioptions_->point_read_learning_rate) *
-             mnemosyne_plus_common_constant_in_bpk_optimization_;*/
+    //  		  mnemosyne_plus_common_constant_in_bpk_optimization_ <
+    //  vstorage_->GetBitsPerKeyCommonConstant()) {
+
+    /*   mnemosyne_plus_common_constant_in_bpk_optimization_ =
+           ioptions_->point_read_learning_rate *
+               vstorage_->GetBitsPerKeyCommonConstant() +
+           (1.0 - ioptions_->point_read_learning_rate) *
+               mnemosyne_plus_common_constant_in_bpk_optimization_;*/
     mnemosyne_plus_common_constant_in_bpk_optimization_scaled_down_--;
   }
 
@@ -555,18 +555,17 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
   // tmp_bits_per_key = std::min(tmp_bits_per_key, max_bits_per_key_);
   if (tmp_bits_per_key > max_bits_per_key_) {
     tmp_bits_per_key = max_bits_per_key_;
-    /*
     if (bpk_alloc_type_ == BitsPerKeyAllocationType::kMnemosynePlusBpkAlloc) {
-      double temp_mnemosyne_plus_common_constant_in_bpk_optimization_ =
+      /*double temp_mnemosyne_plus_common_constant_in_bpk_optimization_ =
           -(tmp_bits_per_key * log_2_squared) -
           std::log(weight * mnemosyne_plus_total_empty_queries_);
       mnemosyne_plus_common_constant_in_bpk_optimization_ =
           ioptions_->point_read_learning_rate *
               temp_mnemosyne_plus_common_constant_in_bpk_optimization_ +
           (1.0 - ioptions_->point_read_learning_rate) *
-              mnemosyne_plus_common_constant_in_bpk_optimization_;
+              mnemosyne_plus_common_constant_in_bpk_optimization_;*/
       mnemosyne_plus_common_constant_in_bpk_optimization_scaled_down_++;
-    }*/
+    }
   }
 
   uint64_t old_total_bits =
@@ -575,26 +574,24 @@ bool BitsPerKeyAllocHelper::IfNeedAllocateBitsPerKey(
   //   old_total_bits -= vstorage_->GetSkippedFilterSize() * 8;
   // }
   uint64_t old_total_entries = total_num_entries_ - num_entries_in_compaction_;
-  const double overused_percentage = 0.2;
+  const double overused_bits_per_key = overall_bits_per_key_ + 1.0;
+  // const double overused_bits_per_key = overall_bits_per_key_ * (1.0 + 0.2);
   if (old_total_entries == 0 ||
-      old_total_bits > old_total_entries * overall_bits_per_key_ *
-                           (1 + overused_percentage)) {
+      old_total_bits > old_total_entries * overused_bits_per_key) {
     // if the old bits-per-key exceeds the overall bits-per-key (this should
     // rarely happen), we only care about if the assigned bits-per-key is larger
     // than
-    if (tmp_bits_per_key > overall_bits_per_key_ * (1 + overused_percentage)) {
+    if (tmp_bits_per_key > overused_bits_per_key) {
       return false;
     }
   } else if ((old_total_bits + tmp_bits_per_key * num_entries) * 1.0 /
                  (old_total_entries + num_entries) >
-             overall_bits_per_key_ *
-                 (1 +
-                  overused_percentage)) {  // if the bits-per-key is overused
+             overused_bits_per_key) {  // if the bits-per-key is overused
 
-    tmp_bits_per_key = ((overall_bits_per_key_ * (1 + overused_percentage)) *
-                            (old_total_entries + num_entries) -
-                        old_total_bits) /
-                       num_entries;
+    tmp_bits_per_key =
+        ((overused_bits_per_key) * (old_total_entries + num_entries) -
+         old_total_bits) /
+        num_entries;
   }
   *bits_per_key = tmp_bits_per_key;
   avg_curr_bits_per_key = (old_total_bits + tmp_bits_per_key * num_entries) *
